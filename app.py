@@ -69,15 +69,7 @@ except Exception as e:
     app_logger.error(f"Error initializing Razorpay client: {e}")
     razorpay_client = None
 
-REFERRAL_QUESTS_CONFIG = [
-    {"target": 5, "reward": 250},
-    {"target": 10, "reward": 500},
-    {"target": 20, "reward": 1500},
-    {"target": 30, "reward": 3000},
-    {"target": 50, "reward": 5000},
-    {"target": 100, "reward": 10000}
-]   
-FRONTEND_SIGNUP_BASE_URL = os.environ.get("FRONTEND_SIGNUP_BASE_URL", "http://localhost:4200/signup")
+FRONTEND_SIGNUP_BASE_URL = os.environ.get("FRONTEND_SIGNUP_BASE_URL", "https://volt-earning.vercel.app/signup")
 
 # --- DECORATOR for Admin Authentication ---
 def admin_required(f):
@@ -444,10 +436,10 @@ def get_invite_data(user_id):
     try:
         # 1. Fetch user's profile and wallet data
         user_data_response = supabase.table('profiles') \
-                                .select('referral_code, user_wallets(pending_referral_bonus, total_referral_earnings)') \
-                                .eq('id', user_id) \
-                                .single() \
-                                .execute()
+                                     .select('referral_code, user_wallets(pending_referral_bonus, total_referral_earnings)') \
+                                     .eq('id', user_id) \
+                                     .single() \
+                                     .execute()
 
         if not user_data_response.data:
             return jsonify({'success': False, 'message': 'User data not found.'}), 404
@@ -464,39 +456,29 @@ def get_invite_data(user_id):
             referral_code = str(uuid.uuid4()).replace('-', '')[:10].upper()
             supabase.table('profiles').update({'referral_code': referral_code}).eq('id', user_id).execute()
 
-
         pending_bonus = wallet_data.get('pending_referral_bonus', 0.0)
         total_referral_earnings = wallet_data.get('total_referral_earnings', 0.0)
         
         # 2. Count total direct referrals (users whose referrer_id is this user's ID)
         referred_users_response = supabase.table('profiles') \
-                                  .select('id') \
-                                  .eq('referrer_id', user_id) \
-                                  .execute()
+                                         .select('id') \
+                                         .eq('referrer_id', user_id) \
+                                         .execute()
         
         total_referrals = len(referred_users_response.data) if referred_users_response.data else 0
 
-        # 3. Count activated referrals (e.g., those who made a first deposit)
-        # This is a critical point. You need to define "activated".
-        # For this example, let's assume a referred user is "activated" if they have
-        # at least one 'recharge' transaction.
-        # This would typically be a more complex query, potentially involving a view.
-        # For demonstration, let's count directly referred users who have ANY 'recharge' transaction.
-        
-        # Get IDs of users referred by current user
+        # 3. Count activated referrals
         direct_referral_ids = [user['id'] for user in referred_users_response.data] if referred_users_response.data else []
         
         activated_referrals_count = 0
         if direct_referral_ids:
-            # Query transactions table for recharges made by direct_referral_ids
             recharge_transactions_response = supabase.table('transactions') \
-                                             .select('user_id', count='exact') \
-                                             .in_('user_id', direct_referral_ids) \
-                                             .eq('type', 'recharge') \
-                                             .eq('status', 'completed') \
-                                             .execute()
+                                                     .select('user_id', count='exact') \
+                                                     .in_('user_id', direct_referral_ids) \
+                                                     .eq('type', 'recharge') \
+                                                     .eq('status', 'completed') \
+                                                     .execute()
             
-            # Use a set to count unique user_ids from these transactions
             activated_user_ids = set()
             if recharge_transactions_response.data:
                 for tx in recharge_transactions_response.data:
@@ -504,87 +486,16 @@ def get_invite_data(user_id):
             
             activated_referrals_count = len(activated_user_ids)
 
-
-        # 4. Fetch/Determine Quest Bonuses status
-        # First, ensure all quest types from config exist for this user in user_quests, creating if not.
-        existing_quests_response = supabase.table('user_quests') \
-                                   .select('quest_target, reward_amount, is_completed, is_claimed, id') \
-                                   .eq('user_id', user_id) \
-                                   .execute()
-        existing_quests_map = {q['quest_target']: q for q in existing_quests_response.data} if existing_quests_response.data else {}
-
-        quests_to_return = []
-        for quest_config in REFERRAL_QUESTS_CONFIG:
-            target = quest_config['target']
-            reward = quest_config['reward']
-            
-            existing_quest = existing_quests_map.get(target)
-            
-            is_completed = False
-            is_claimed = False
-            quest_id = None
-
-            if existing_quest:
-                is_completed = existing_quest['is_completed']
-                is_claimed = existing_quest['is_claimed']
-                quest_id = existing_quest['id']
-            
-            # Re-evaluate completion status based on current activated_referrals_count
-            if not is_completed and activated_referrals_count >= target:
-                is_completed = True
-                # Update in DB if status changed
-                if existing_quest: # Update existing
-                    supabase.table('user_quests').update({
-                        'is_completed': True,
-                        'completed_at': datetime.datetime.now().isoformat()
-                    }).eq('id', quest_id).execute()
-                else: # Insert new quest if it was just completed
-                     insert_response = supabase.table('user_quests').insert({
-                        'user_id': user_id,
-                        'quest_target': target,
-                        'reward_amount': reward,
-                        'is_completed': True,
-                        'is_claimed': False,
-                        'completed_at': datetime.datetime.now().isoformat()
-                    }).execute()
-                     if insert_response.data:
-                         quest_id = insert_response.data[0]['id']
-
-
-            # If no existing quest, create a placeholder (or if just completed, it was inserted above)
-            if not existing_quest and not is_completed: # if it wasn't completed now and didn't exist
-                 insert_response = supabase.table('user_quests').insert({
-                    'user_id': user_id,
-                    'quest_target': target,
-                    'reward_amount': reward,
-                    'is_completed': False,
-                    'is_claimed': False
-                }).execute()
-                 if insert_response.data:
-                    quest_id = insert_response.data[0]['id']
-                 else:
-                    app_logger.error(f"Failed to initialize quest {target} for user {user_id}. Supabase error: {insert_response.error}")
-                    # Continue anyway, but this quest won't be claimable until fixed in DB
-
-            quests_to_return.append({
-                'id': quest_id, # Frontend might need this for claiming
-                'target': target,
-                'reward': reward,
-                'completed': is_completed,
-                'claimed': is_claimed
-            })
-
-
+        # 4. Construct the final response without quest bonuses
         return jsonify({
             'success': True,
             'referralCode': referral_code,
             'invitationLink': f"{FRONTEND_SIGNUP_BASE_URL}?ref={referral_code}",
             'totalReferrals': total_referrals,
-            'currentInvites': activated_referrals_count, # This is 'currentInvites' in frontend
+            'currentInvites': activated_referrals_count,
             'referralEarnings': total_referral_earnings,
             'pendingBonus': pending_bonus,
             'canClaimBonus': pending_bonus > 0,
-            'questBonuses': quests_to_return
         }), 200
 
     except Exception as e:
