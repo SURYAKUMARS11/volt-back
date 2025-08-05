@@ -1081,7 +1081,7 @@ def handle_withdrawal_request():
             'fee': withdrawal_fee,
             'type': 'withdrawal',
             'status': 'pending',
-            'description': f"Withdrawal request for {total_amount_to_deduct} INR (manual processing)",
+            'description': f"Withdrawal request for {total_amount_to_deduct} INR (processing)",
             'bank_card_id': bank_card_id,
             'metadata': bank_details
         }
@@ -1097,7 +1097,7 @@ def handle_withdrawal_request():
 
         return jsonify({
             'success': True,
-            'message': f'Withdrawal request for ₹{total_amount_to_deduct} submitted. It is now pending manual processing.',
+            'message': f'Withdrawal request for ₹{total_amount_to_deduct} submitted. It is now processing.',
             'new_order_income': new_order_income,
             'transaction_id': transaction_response.data[0]['id']
         }), 200
