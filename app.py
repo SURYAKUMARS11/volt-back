@@ -675,12 +675,9 @@ def confirm_manual_payment():
             'status': 'pending'
         }
         
+        # Use a try-except block to handle potential errors from the Supabase client
         insert_response = supabase.table('manual_payments').insert(payment_data).execute()
         
-        if insert_response.error:
-            app_logger.error(f"Supabase insert failed: {insert_response.error.message}")
-            return jsonify({'success': False, 'message': 'Failed to save payment details.'}), 500
-
         app_logger.info(f"Manual payment submitted for user {user_id} with UTR: {utr_number}")
 
         return jsonify({
@@ -689,8 +686,10 @@ def confirm_manual_payment():
         }), 201 # 201 Created
 
     except Exception as e:
+        # This block will now correctly catch any errors, including Supabase API errors
         app_logger.error(f"Internal Server Error while confirming manual payment: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
+
 
 # --- NEW: Create Razorpay Order Endpoint ---
 # This endpoint is called by the frontend to get an order_id before opening the Razorpay popup.
