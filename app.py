@@ -643,6 +643,55 @@ def claim_referral_bonus():
         app_logger.error(f"Error claiming referral bonus for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred while claiming bonus.'}), 500
 
+
+@app.route('/api/manual-payment/confirm', methods=['POST'])
+def confirm_manual_payment():
+    """
+    Endpoint for users to submit their manual UPI payment details (UTR, amount, mobile number)
+    for admin verification.
+    """
+    data = request.get_json()
+    user_id = data.get('userId')
+    amount = data.get('amount')
+    utr_number = data.get('utrNumber')
+    mobile_number = data.get('mobileNumber')
+
+    if not all([user_id, amount, utr_number, mobile_number]):
+        app_logger.error("Missing required fields for manual payment confirmation.")
+        return jsonify({'success': False, 'message': 'Missing required payment details.'}), 400
+
+    # Basic data validation
+    if not (isinstance(amount, (int, float)) and len(str(utr_number)) == 12 and len(str(mobile_number)) == 10):
+        app_logger.error("Invalid data format for manual payment.")
+        return jsonify({'success': False, 'message': 'Invalid data format.'}), 400
+
+    try:
+        # Insert the payment details into a new table for manual verification
+        payment_data = {
+            'user_id': user_id,
+            'amount': amount,
+            'utr_number': utr_number,
+            'mobile_number': mobile_number,
+            'status': 'pending'
+        }
+        
+        insert_response = supabase.table('manual_payments').insert(payment_data).execute()
+        
+        if insert_response.error:
+            app_logger.error(f"Supabase insert failed: {insert_response.error.message}")
+            return jsonify({'success': False, 'message': 'Failed to save payment details.'}), 500
+
+        app_logger.info(f"Manual payment submitted for user {user_id} with UTR: {utr_number}")
+
+        return jsonify({
+            'success': True,
+            'message': 'Payment details submitted successfully. Awaiting admin verification.'
+        }), 201 # 201 Created
+
+    except Exception as e:
+        app_logger.error(f"Internal Server Error while confirming manual payment: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
+
 # --- NEW: Create Razorpay Order Endpoint ---
 # This endpoint is called by the frontend to get an order_id before opening the Razorpay popup.
 @app.route('/api/recharge/create-razorpay-order', methods=['POST'])
