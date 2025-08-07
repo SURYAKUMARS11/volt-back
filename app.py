@@ -871,16 +871,14 @@ def verify_razorpay_payment():
 
 @app.route('/api/user/recharge-records/<uuid:user_id>', methods=['GET'])
 def get_recharge_records(user_id):
-    # WARNING: This endpoint is now public. Anyone can access any user's records
-    # by changing the user_id in the URL. Proceed with caution.
-    
-    # We no longer need to check if g.user['id'] matches user_id
-    
+    """
+    Endpoint to fetch manual recharge records for a specific user.
+    """
     try:
-        response = supabase.table('transactions') \
-            .select('amount, status, created_at, payment_gateway_id') \
+        # Query the 'manual_payments' table instead of 'transactions'
+        response = supabase.table('manual_payments') \
+            .select('amount, status, created_at, utr_number') \
             .eq('user_id', user_id) \
-            .eq('type', 'recharge') \
             .order('created_at', desc=True) \
             .execute()
             
@@ -890,7 +888,8 @@ def get_recharge_records(user_id):
 
     except Exception as e:
         app_logger.error(f"Error fetching recharge records for user {user_id}: {e}", exc_info=True)
-        return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
+        return jsonify({'success': False, 'message': 'An unexpected error occurred.'})
+        
     
 @app.route('/api/user/withdrawal-records/<uuid:user_id>', methods=['GET'])
 def get_withdrawal_records(user_id):
