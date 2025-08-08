@@ -1288,6 +1288,16 @@ def handle_withdrawal_request():
         if not isinstance(amount, (int, float)) or amount <= 0:
             return jsonify({'success': False, 'message': 'Invalid withdrawal amount.'}), 400
 
+        # NEW: Check for withdrawal frequency
+        today = datetime.date.today()
+        start_of_day = datetime.datetime.combine(today, datetime.time.min, tzinfo=datetime.timezone.utc)
+        
+        withdrawal_count_response = supabase.table('transactions').select('id').eq('user_id', user_id).eq('type', 'withdrawal').gt('created_at', start_of_day.isoformat()).execute()
+        
+        if withdrawal_count_response.data and len(withdrawal_count_response.data) >= 2:
+            app_logger.warning(f"Withdrawal failed: User {user_id} has exceeded the daily withdrawal limit.")
+            return jsonify({'success': False, 'message': 'You can only withdraw twice per day.'}), 403
+
         # NEW: Check if the user has a successful investment before proceeding
         investment_check_response = supabase.table('manual_payment').select('id').eq('user_id', user_id).eq('status', 'success').limit(1).execute()
         if not investment_check_response.data or len(investment_check_response.data) == 0:
