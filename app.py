@@ -691,6 +691,68 @@ def confirm_manual_payment():
         return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
 
 
+# --- NEW: Get All Pending Manual Payments Endpoint ---
+@app.route('/api/admin/manual-payments/pending', methods=['GET'])
+def get_pending_manual_payments():
+    """
+    Admin-only endpoint to fetch all pending manual payment records.
+    This route must be protected with admin authentication.
+    """
+    try:
+        # Fetch all records with a 'pending' status from the manual_payments table
+        response = supabase.table('manual_payments') \
+            .select('*') \
+            .eq('status', 'pending') \
+            .order('created_at', desc=True) \
+            .execute()
+        
+        if response.data:
+            app_logger.info(f"Fetched {len(response.data)} pending manual payment requests.")
+            return jsonify({'success': True, 'records': response.data}), 200
+        else:
+            app_logger.info("No pending manual payment requests found.")
+            return jsonify({'success': True, 'records': []}), 200
+    
+    except Exception as e:
+        app_logger.error(f"Error fetching pending payments: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'Failed to fetch records.'}), 500
+
+
+# --- NEW: Reject a Manual Payment Endpoint ---
+@app.route('/api/admin/manual-payment/reject', methods=['POST'])
+def reject_manual_payment():
+    """
+    Admin-only endpoint to reject a manual payment and mark it as 'failed'.
+    This route must be protected with admin authentication.
+    """
+    data = request.get_json()
+    utr_number = data.get('utr_number')
+    
+    if not utr_number:
+        app_logger.error("Missing UTR number for manual payment rejection.")
+        return jsonify({'success': False, 'message': 'UTR number is required.'}), 400
+
+    try:
+        # Update the payment record to 'failed' in the database
+        update_response = supabase.table('manual_payments') \
+            .update({'status': 'failed', 'description': 'Rejected by admin.'}) \
+            .eq('utr_number', utr_number) \
+            .execute()
+        
+        if update_response.data:
+            app_logger.info(f"Manual payment with UTR {utr_number} successfully rejected.")
+            return jsonify({'success': True, 'message': 'Payment request rejected.'}), 200
+        else:
+            app_logger.error(f"Failed to reject manual payment {utr_number}. No matching record found.")
+            return jsonify({'success': False, 'message': 'Payment record not found or already processed.'}), 404
+            
+    except Exception as e:
+        app_logger.error(f"Error rejecting payment for UTR {utr_number}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
+
+
+# --- VERIFY Manual Payment Endpoint (from previous conversation) ---
+# This route handles the approval logic
 @app.route('/api/admin/manual-payment/verify', methods=['POST'])
 def admin_verify_manual_payment():
     """
@@ -727,7 +789,7 @@ def admin_verify_manual_payment():
             .execute()
         app_logger.info(f"Manual payment {utr_number} for user {user_id} marked as 'completed'.")
         
-        # 3. --- REFERRAL COMMISSION LOGIC (COPIED FROM RAZORPAY ROUTE) ---
+        # 3. --- REFERRAL COMMISSION LOGIC ---
         try:
             referrer_response = supabase.table('profiles') \
                 .select('referrer_id') \
@@ -762,7 +824,7 @@ def admin_verify_manual_payment():
         except Exception as commission_error:
             app_logger.error(f"Error processing referral commission for user {user_id} on manual payment: {commission_error}", exc_info=True)
             
-        # 4. --- UPDATE USER'S WALLET (COPIED FROM RAZORPAY ROUTE) ---
+        # 4. --- UPDATE USER'S WALLET ---
         try:
             rpc_response = supabase.rpc('increment_recharged_amount', {
                 'p_user_id': user_id,
@@ -771,7 +833,6 @@ def admin_verify_manual_payment():
             app_logger.info(f"Wallet 'recharged_amount' updated for user {user_id} via RPC.")
         except Exception as rpc_exec_error:
             app_logger.error(f"Failed to execute RPC 'increment_recharged_amount' for {user_id}. Error: {rpc_exec_error}", exc_info=True)
-            # You might want to revert the payment status here if this fails
             raise Exception("Supabase RPC 'increment_recharged_amount' failed...") from rpc_exec_error
             
         return jsonify({
@@ -782,6 +843,7 @@ def admin_verify_manual_payment():
     except Exception as e:
         app_logger.error(f"Internal Server Error during manual payment verification for UTR {utr_number}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred during verification.'}), 500
+
 
 
 
