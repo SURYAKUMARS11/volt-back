@@ -1364,7 +1364,10 @@ def handle_withdrawal_request():
     except Exception as e:
         app_logger.error(f"Unhandled error in withdrawal request for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred during withdrawal request submission.'}), 500
-
+        
+@app.route('/ping')
+def ping():
+    return "pong", 200
 
 # --- Main execution block ---
 if __name__ == '__main__':
