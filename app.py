@@ -1252,20 +1252,47 @@ def verify_user_password():
         return jsonify({'success': False, 'message': f'Trade password verification failed: {error_message}'}), 500
 
 
+@app.route('/api/user/has-successful-investment', methods=['GET'])
+def check_successful_investment():
+    try:
+        user_id = request.args.get('userId')
+        if not user_id:
+            return jsonify({'hasInvested': False}), 400
+
+        # Query the manual_payment table for any successful payments by this user
+        response = supabase.table('manual_payment').select('id').eq('user_id', user_id).eq('status', 'success').limit(1).execute()
+
+        # If any data is returned, it means a successful payment exists
+        if response.data and len(response.data) > 0:
+            return jsonify({'hasInvested': True}), 200
+        else:
+            return jsonify({'hasInvested': False}), 200
+
+    except Exception as e:
+        app_logger.error(f"Error checking for successful investment for user {user_id}: {e}", exc_info=True)
+        return jsonify({'hasInvested': False}), 500
+
+# --- Updated withdrawal request handler ---
 @app.route('/api/withdrawal/request', methods=['POST'])
 def handle_withdrawal_request():
     try:
         data = request.json
         user_id = data.get('userId')
-        amount = data.get('amount') # Amount in INR
+        amount = data.get('amount')  # Amount in INR
         bank_card_id = data.get('bankCardId')
-        bank_details = data.get('bankDetails') 
+        bank_details = data.get('bankDetails')
 
         if not all([user_id, amount, bank_card_id, bank_details]):
             return jsonify({'success': False, 'message': 'Missing withdrawal details.'}), 400
 
         if not isinstance(amount, (int, float)) or amount <= 0:
             return jsonify({'success': False, 'message': 'Invalid withdrawal amount.'}), 400
+
+        # NEW: Check if the user has a successful investment before proceeding
+        investment_check_response = supabase.table('manual_payment').select('id').eq('user_id', user_id).eq('status', 'success').limit(1).execute()
+        if not investment_check_response.data or len(investment_check_response.data) == 0:
+            app_logger.warning(f"Withdrawal failed: User {user_id} has no successful investments.")
+            return jsonify({'success': False, 'message': 'You must have a successful investment to withdraw.'}), 403
 
         # 1. Fetch current order_income from the user's wallet
         wallet_response = supabase.table('user_wallets').select('order_income').eq('user_id', user_id).single().execute()
@@ -1274,14 +1301,14 @@ def handle_withdrawal_request():
             return jsonify({'success': False, 'message': 'User wallet not found.'}), 404
 
         current_order_income = wallet_response.data['order_income']
-        
+
         # 2. Calculate Fee and Final Amount
         fee_rate = 0.12
         withdrawal_fee = round(amount * fee_rate, 2)
         total_amount_to_deduct = round(amount, 2)
 
         print(f"DEBUG: Current income in DB: {current_order_income}, Withdrawal requested: {total_amount_to_deduct}")
-        
+
         # Check if withdrawal amount exceeds the order_income
         if current_order_income < total_amount_to_deduct:
             return jsonify({'success': False, 'message': 'Insufficient order income for withdrawal.'}), 400
@@ -1327,7 +1354,7 @@ def handle_withdrawal_request():
     except Exception as e:
         app_logger.error(f"Unhandled error in withdrawal request for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred during withdrawal request submission.'}), 500
-    
+
 
 # --- Main execution block ---
 if __name__ == '__main__':
