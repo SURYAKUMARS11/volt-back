@@ -294,6 +294,15 @@ def process_withdrawal_action():
     return redirect(url_for('admin_dashboard'))
 
 
+@app.route('/admin/recharge')
+def admin_recharge_dashboard():
+    """
+    Renders the admin dashboard for manual recharge verification.
+    This route must be protected with admin authentication.
+    """
+    return render_template('recharge_admin.html')
+
+
 # --- EXISTING ROUTES (as provided in your context) ---
 
 @app.route('/api/create-supabase-user', methods=['POST'])
