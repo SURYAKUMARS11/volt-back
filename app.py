@@ -518,48 +518,58 @@ def get_team_data(user_id):
         return jsonify({'error': 'Backend setup issue: Supabase client not initialized'}), 500
 
     try:
-        # 1. Fetch total referrals (users whose referrer_id is this user's ID)
-        # We'll use this query to get both the count and the member data.
+        # 1. Fetch total referrals and member data
         referred_users_response = supabase.table('profiles') \
-                                          .select('id, nickname, phone_number') \
-                                          .eq('referrer_id', user_id) \
-                                          .execute()
+            .select('id, nickname, phone_number') \
+            .eq('referrer_id', user_id) \
+            .execute()
         
         referred_users = referred_users_response.data if referred_users_response.data else []
         total_referrals = len(referred_users)
 
         # 2. Fetch total earnings from the user's wallet
         wallet_data_response = supabase.table('user_wallets') \
-                                       .select('total_referral_earnings') \
-                                       .eq('user_id', user_id) \
-                                       .single() \
-                                       .execute()
+            .select('total_referral_earnings') \
+            .eq('user_id', user_id) \
+            .single() \
+            .execute()
         
         total_earnings = 0
         if wallet_data_response.data:
             total_earnings = wallet_data_response.data.get('total_referral_earnings', 0.0)
 
-        # 3. Process the list of team members
+        # 3. Process the list of team members and determine their status
         team_members_list = []
         for member in referred_users:
             member_id = member['id']
 
-            # You need a way to determine the member's status (active/inactive).
-            # One way is to check for completed recharge transactions.
-            # This is a good place to make this determination.
+            # --- MODIFIED LOGIC HERE ---
+            # Check for completed transactions in the 'transactions' table (Razorpay)
             recharge_tx_response = supabase.table('transactions') \
-                                           .select('id') \
-                                           .eq('user_id', member_id) \
-                                           .eq('type', 'recharge') \
-                                           .eq('status', 'completed') \
-                                           .limit(1) \
-                                           .execute()
+                .select('id') \
+                .eq('user_id', member_id) \
+                .eq('type', 'recharge') \
+                .eq('status', 'completed') \
+                .limit(1) \
+                .execute()
             
             is_active = len(recharge_tx_response.data) > 0
+
+            # If no Razorpay transaction found, check the 'manual_payments' table
+            if not is_active:
+                manual_payment_response = supabase.table('manual_payments') \
+                    .select('id') \
+                    .eq('user_id', member_id) \
+                    .eq('status', 'completed') \
+                    .limit(1) \
+                    .execute()
+                
+                is_active = len(manual_payment_response.data) > 0
+            # --- END MODIFIED LOGIC ---
             
             team_members_list.append({
-                'name': member.get('full_name', 'Unnamed User'),
-                'phone': f"{member.get('phone_number', '********')[:5]}****{member.get('phone_number', '********')[-2:]}",
+                'name': member.get('nickname', 'Unnamed User'),
+                'phone': f"{member.get('phone_number', '')[:5]}****{member.get('phone_number', '')[-2:]}",
                 'status': 'active' if is_active else 'inactive'
             })
 
