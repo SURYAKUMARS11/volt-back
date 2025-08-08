@@ -1260,7 +1260,7 @@ def check_successful_investment():
             return jsonify({'hasInvested': False}), 400
 
         # Query the manual_payment table for any successful payments by this user
-        response = supabase.table('manual_payment').select('id').eq('user_id', user_id).eq('status', 'success').limit(1).execute()
+        response = supabase.table('manual_payments').select('id').eq('user_id', user_id).eq('status', 'success').limit(1).execute()
 
         # If any data is returned, it means a successful payment exists
         if response.data and len(response.data) > 0:
