@@ -737,132 +737,145 @@ def get_pending_manual_payments():
         return jsonify({'success': False, 'message': 'Failed to fetch records.'}), 500
 
 
-# --- NEW: Reject a Manual Payment Endpoint ---
 @app.route('/api/admin/manual-payment/reject', methods=['POST'])
 def reject_manual_payment():
     """
-    Admin-only endpoint to reject a manual payment and mark it as 'failed'.
-    This route must be protected with admin authentication.
+    Admin-only endpoint to reject a manual payment and mark it as 'rejected'.
+    This route handles multiple pending payments submitted with the same UTR number.
     """
-    data = request.get_json()
-    utr_number = data.get('utr_number')
-    
-    if not utr_number:
-        app_logger.error("Missing UTR number for manual payment rejection.")
-        return jsonify({'success': False, 'message': 'UTR number is required.'}), 400
-
     try:
-        # Update the payment record to 'failed' in the database
-        update_response = supabase.table('manual_payments') \
-            .update({'status': 'failed', 'description': 'Rejected by admin.'}) \
-            .eq('utr_number', utr_number) \
-            .execute()
+        # data from request
+        data = request.get_json()
+        utr_number = data.get('utr_number')
         
-        if update_response.data:
-            app_logger.info(f"Manual payment with UTR {utr_number} successfully rejected.")
-            return jsonify({'success': True, 'message': 'Payment request rejected.'}), 200
-        else:
-            app_logger.error(f"Failed to reject manual payment {utr_number}. No matching record found.")
-            return jsonify({'success': False, 'message': 'Payment record not found or already processed.'}), 404
-            
+        if not utr_number:
+            app_logger.error("Missing UTR number for manual payment rejection.")
+            return jsonify({'success': False, 'message': 'UTR number is required.'}), 400
+
+        # Fetch all pending records for the UTR, not just a single one
+        response = supabase.table('manual_payments') \
+                          .select('id') \
+                          .eq('utr_number', utr_number) \
+                          .eq('status', 'pending') \
+                          .execute()
+
+        if not response.data:
+            app_logger.error(f"No pending payments found for UTR: {utr_number}")
+            return jsonify({'success': False, 'message': 'No pending payment found for this UTR number.'}), 404
+
+        # Update each payment record found to 'rejected'
+        for payment_record in response.data:
+            supabase.table('manual_payments') \
+                    .update({'status': 'rejected'}) \
+                    .eq('id', payment_record['id']) \
+                    .execute()
+        
+        app_logger.info(f"Manual payments with UTR {utr_number} successfully rejected.")
+        return jsonify({'success': True, 'message': f'Payment requests for UTR {utr_number} rejected.'}), 200
+
+    except APIError as e:
+        app_logger.error(f"PostgREST API error during manual payment rejection: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'A database error occurred.'}), 500
     except Exception as e:
         app_logger.error(f"Error rejecting payment for UTR {utr_number}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
 
 
+
 # --- VERIFY Manual Payment Endpoint (from previous conversation) ---
-# This route handles the approval logic
 @app.route('/api/admin/manual-payment/verify', methods=['POST'])
 def admin_verify_manual_payment():
     """
     Admin-only endpoint to verify and complete a manual payment.
-    This route should be protected with an authentication mechanism for admins.
+    This route handles multiple payments submitted with the same UTR number.
     """
-    data = request.get_json()
-    utr_number = data.get('utr_number')
-    
-    if not utr_number:
-        app_logger.error("Missing UTR number for manual payment verification.")
-        return jsonify({'success': False, 'message': 'UTR number is required.'}), 400
-
     try:
-        # 1. Fetch the manual payment record from the database
-        payment_record_response = supabase.table('manual_payments') \
-            .select('user_id, amount') \
-            .eq('utr_number', utr_number) \
-            .eq('status', 'pending') \
-            .single() \
-            .execute()
+        # data from request
+        data = request.get_json()
+        utr_number = data.get('utr_number')
         
-        if not payment_record_response.data:
-            app_logger.error(f"Pending manual payment with UTR {utr_number} not found.")
-            return jsonify({'success': False, 'message': 'Pending payment not found.'}), 404
+        if not utr_number:
+            app_logger.error("Missing UTR number for manual payment verification.")
+            return jsonify({'success': False, 'message': 'UTR number is required.'}), 400
+
+        # 1. Fetch all pending records for the UTR, not just a single one
+        response = supabase.table('manual_payments') \
+                          .select('user_id,amount,id') \
+                          .eq('utr_number', utr_number) \
+                          .eq('status', 'pending') \
+                          .execute()
         
-        user_id = payment_record_response.data.get('user_id')
-        recharge_amount_inr = payment_record_response.data.get('amount')
-        
-        # 2. Update the manual payment record to 'completed'
-        supabase.table('manual_payments') \
-            .update({'status': 'completed'}) \
-            .eq('utr_number', utr_number) \
-            .execute()
-        app_logger.info(f"Manual payment {utr_number} for user {user_id} marked as 'completed'.")
-        
-        # 3. --- REFERRAL COMMISSION LOGIC ---
-        try:
-            referrer_response = supabase.table('profiles') \
-                .select('referrer_id') \
-                .eq('id', user_id) \
-                .single() \
-                .execute()
+        if not response.data:
+            app_logger.error(f"No pending payments found for UTR: {utr_number}")
+            return jsonify({'success': False, 'message': 'No pending payment found for this UTR number.'}), 404
+
+        # Since there may be multiple, we process all of them
+        for payment_data in response.data:
+            user_id = payment_data['user_id']
+            recharge_amount_inr = payment_data['amount']
+            payment_id = payment_data['id']
+
+            # 2. Update the manual payment record to 'completed'
+            supabase.table('manual_payments') \
+                    .update({'status': 'completed'}) \
+                    .eq('id', payment_id) \
+                    .execute()
+            app_logger.info(f"Manual payment {utr_number} for user {user_id} marked as 'completed'.")
             
-            referrer_id = referrer_response.data.get('referrer_id') if referrer_response.data else None
-            
-            if referrer_id:
-                app_logger.info(f"User {user_id} was referred by {referrer_id}. Calculating commission.")
-                commission_amount = float(recharge_amount_inr) * 0.10
+            # 3. --- REFERRAL COMMISSION LOGIC ---
+            try:
+                referrer_response = supabase.table('profiles') \
+                                            .select('referrer_id') \
+                                            .eq('id', user_id) \
+                                            .single() \
+                                            .execute()
                 
-                commission_rpc_response = supabase.rpc('increment_referral_commission', {
-                    'p_user_id': referrer_id,
-                    'p_amount': commission_amount
+                referrer_id = referrer_response.data.get('referrer_id') if referrer_response.data else None
+                
+                if referrer_id:
+                    app_logger.info(f"User {user_id} was referred by {referrer_id}. Calculating commission.")
+                    commission_amount = float(recharge_amount_inr) * 0.10
+                    
+                    commission_rpc_response = supabase.rpc('increment_referral_commission', {
+                        'p_user_id': referrer_id,
+                        'p_amount': commission_amount
+                    }).execute()
+
+                    if commission_rpc_response.status_code == 204:
+                        app_logger.info(f"Commission of {commission_amount} credited to referrer {referrer_id}.")
+                        commission_log_data = {
+                            'referrer_id': referrer_id,
+                            'referred_user_id': user_id,
+                            'commission_amount': commission_amount,
+                            'investment_amount': float(recharge_amount_inr)
+                        }
+                        supabase.table('commissions').insert(commission_log_data).execute()
+                        app_logger.info(f"Commission log created for referrer {referrer_id}.")
+                    else:
+                        app_logger.error(f"Failed to credit commission for referrer {referrer_id}. RPC response: {commission_rpc_response.status_code}")
+
+            except Exception as commission_error:
+                app_logger.error(f"Error processing referral commission for user {user_id} on manual payment: {commission_error}", exc_info=True)
+            
+            # 4. --- UPDATE USER'S WALLET ---
+            try:
+                rpc_response = supabase.rpc('increment_recharged_amount', {
+                    'p_user_id': user_id,
+                    'p_amount': float(recharge_amount_inr)  
                 }).execute()
+                app_logger.info(f"Wallet 'recharged_amount' updated for user {user_id} via RPC.")
+            except Exception as rpc_exec_error:
+                app_logger.error(f"Failed to execute RPC 'increment_recharged_amount' for {user_id}. Error: {rpc_exec_error}", exc_info=True)
+                raise Exception("Supabase RPC 'increment_recharged_amount' failed...") from rpc_exec_error
 
-                if commission_rpc_response.status_code == 204:
-                    app_logger.info(f"Commission of {commission_amount} credited to referrer {referrer_id}.")
-                    commission_log_data = {
-                        'referrer_id': referrer_id,
-                        'referred_user_id': user_id,
-                        'commission_amount': commission_amount,
-                        'investment_amount': float(recharge_amount_inr)
-                    }
-                    supabase.table('commissions').insert(commission_log_data).execute()
-                    app_logger.info(f"Commission log created for referrer {referrer_id}.")
-                else:
-                    app_logger.error(f"Failed to credit commission for referrer {referrer_id}. RPC response: {commission_rpc_response.status_code}")
-
-        except Exception as commission_error:
-            app_logger.error(f"Error processing referral commission for user {user_id} on manual payment: {commission_error}", exc_info=True)
-            
-        # 4. --- UPDATE USER'S WALLET ---
-        try:
-            rpc_response = supabase.rpc('increment_recharged_amount', {
-                'p_user_id': user_id,
-                'p_amount': float(recharge_amount_inr)  
-            }).execute()
-            app_logger.info(f"Wallet 'recharged_amount' updated for user {user_id} via RPC.")
-        except Exception as rpc_exec_error:
-            app_logger.error(f"Failed to execute RPC 'increment_recharged_amount' for {user_id}. Error: {rpc_exec_error}", exc_info=True)
-            raise Exception("Supabase RPC 'increment_recharged_amount' failed...") from rpc_exec_error
-            
         return jsonify({
             'success': True,
-            'message': 'Manual payment successfully verified and wallet updated.'
+            'message': 'Manual payments successfully verified and wallets updated.'
         }), 200
 
     except Exception as e:
         app_logger.error(f"Internal Server Error during manual payment verification for UTR {utr_number}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred during verification.'}), 500
-
 
 
 
