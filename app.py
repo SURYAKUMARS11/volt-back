@@ -878,6 +878,7 @@ def admin_verify_manual_payment():
                     raise Exception("Supabase RPC 'increment_recharged_amount' failed...") from rpc_exec_error
 
                 # --- NEW: Send Telegram notification to admin ---
+                
                 notification_message = (
                     f"✅ <b>Payment Verified!</b>\n"
                     f"<b>User ID:</b> <code>{user_id}</code>\n"
@@ -885,7 +886,9 @@ def admin_verify_manual_payment():
                     f"<b>UTR:</b> <code>{utr_number}</code>\n"
                     f"Wallet credited successfully."
                 )
+                app_logger.info("Attempting to send Telegram notification...")
                 send_telegram_notification(notification_message)
+                app_logger.info("Telegram notification function was called.")
                 # -----------------------------------------------
 
                 first_payment_processed = True
