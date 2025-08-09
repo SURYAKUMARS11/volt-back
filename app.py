@@ -800,10 +800,10 @@ def admin_verify_manual_payment():
 
         # Fetch all pending records for the UTR
         response = supabase.table('manual_payments') \
-                          .select('user_id,amount,id,is_credited') \
-                          .eq('utr_number', utr_number) \
-                          .eq('status', 'pending') \
-                          .execute()
+                            .select('user_id,amount,id,is_credited') \
+                            .eq('utr_number', utr_number) \
+                            .eq('status', 'pending') \
+                            .execute()
         
         if not response.data:
             app_logger.error(f"No pending payments found for UTR: {utr_number}")
@@ -831,7 +831,7 @@ def admin_verify_manual_payment():
                         .execute()
                 app_logger.info(f"Manual payment {utr_number} for user {user_id} marked as 'completed' and credited.")
                 
-                # 2. --- REFERRAL COMMISSION LOGIC --- (Keep as is)
+                # 2. --- REFERRAL COMMISSION LOGIC ---
                 try:
                     referrer_response = supabase.table('profiles') \
                                                 .select('referrer_id') \
@@ -866,7 +866,7 @@ def admin_verify_manual_payment():
                 except Exception as commission_error:
                     app_logger.error(f"Error processing referral commission for user {user_id} on manual payment: {commission_error}", exc_info=True)
                 
-                # 3. --- UPDATE USER'S WALLET --- (Keep as is)
+                # 3. --- UPDATE USER'S WALLET ---
                 try:
                     rpc_response = supabase.rpc('increment_recharged_amount', {
                         'p_user_id': user_id,
@@ -876,6 +876,17 @@ def admin_verify_manual_payment():
                 except Exception as rpc_exec_error:
                     app_logger.error(f"Failed to execute RPC 'increment_recharged_amount' for {user_id}. Error: {rpc_exec_error}", exc_info=True)
                     raise Exception("Supabase RPC 'increment_recharged_amount' failed...") from rpc_exec_error
+
+                # --- NEW: Send Telegram notification to admin ---
+                notification_message = (
+                    f"✅ <b>Payment Verified!</b>\n"
+                    f"<b>User ID:</b> <code>{user_id}</code>\n"
+                    f"<b>Amount:</b> ₹{recharge_amount_inr}\n"
+                    f"<b>UTR:</b> <code>{utr_number}</code>\n"
+                    f"Wallet credited successfully."
+                )
+                send_telegram_notification(notification_message)
+                # -----------------------------------------------
 
                 first_payment_processed = True
             
@@ -887,7 +898,6 @@ def admin_verify_manual_payment():
                         .execute()
                 app_logger.info(f"Manual payment {utr_number} for user {user_id} marked as 'completed' without crediting.")
 
-
         return jsonify({
             'success': True,
             'message': 'Manual payments successfully verified and wallet credited once for this UTR.'
@@ -896,7 +906,6 @@ def admin_verify_manual_payment():
     except Exception as e:
         app_logger.error(f"Internal Server Error during manual payment verification for UTR {utr_number}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred during verification.'}), 500
-
 
 
 # --- NEW: Create Razorpay Order Endpoint ---
@@ -1407,6 +1416,27 @@ def handle_withdrawal_request():
     except Exception as e:
         app_logger.error(f"Unhandled error in withdrawal request for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred during withdrawal request submission.'}), 500
+
+
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '7840580443:AAE1UQPFopt9OQdjYjkTWJzhsFQ3NFpcl5s')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '5952225695') # <-- Use the chat ID you found
+
+def send_telegram_notification(message_body):
+    """Sends a Telegram message to the specified chat ID."""
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        payload = {
+            'chat_id': TELEGRAM_CHAT_ID,
+            'text': message_body,
+            'parse_mode': 'HTML' # Allows for basic HTML formatting
+        }
+        response = requests.post(url, data=payload)
+        response.raise_for_status()
+        app_logger.info("Telegram notification sent successfully.")
+        return True
+    except requests.exceptions.RequestException as e:
+        app_logger.error(f"Failed to send Telegram notification: {e}")
+        return False
         
 @app.route('/ping')
 def ping():
