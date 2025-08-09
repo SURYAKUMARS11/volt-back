@@ -787,10 +787,10 @@ def reject_manual_payment():
 def admin_verify_manual_payment():
     """
     Admin-only endpoint to verify and complete a manual payment.
-    This route handles multiple payments submitted with the same UTR number.
+    This route handles multiple payments submitted with the same UTR number,
+    but ensures the amount is credited only once.
     """
     try:
-        # data from request
         data = request.get_json()
         utr_number = data.get('utr_number')
         
@@ -798,9 +798,9 @@ def admin_verify_manual_payment():
             app_logger.error("Missing UTR number for manual payment verification.")
             return jsonify({'success': False, 'message': 'UTR number is required.'}), 400
 
-        # 1. Fetch all pending records for the UTR, not just a single one
+        # Fetch all pending records for the UTR
         response = supabase.table('manual_payments') \
-                          .select('user_id,amount,id') \
+                          .select('user_id,amount,id,is_credited') \
                           .eq('utr_number', utr_number) \
                           .eq('status', 'pending') \
                           .execute()
@@ -809,68 +809,88 @@ def admin_verify_manual_payment():
             app_logger.error(f"No pending payments found for UTR: {utr_number}")
             return jsonify({'success': False, 'message': 'No pending payment found for this UTR number.'}), 404
 
-        # Since there may be multiple, we process all of them
+        first_payment_processed = False
+        
+        # Iterate and process all pending records for the same UTR
         for payment_data in response.data:
             user_id = payment_data['user_id']
             recharge_amount_inr = payment_data['amount']
             payment_id = payment_data['id']
+            is_credited = payment_data.get('is_credited', False)
 
-            # 2. Update the manual payment record to 'completed'
-            supabase.table('manual_payments') \
-                    .update({'status': 'completed'}) \
-                    .eq('id', payment_id) \
-                    .execute()
-            app_logger.info(f"Manual payment {utr_number} for user {user_id} marked as 'completed'.")
+            # Check if this UTR has already been credited
+            if is_credited:
+                app_logger.info(f"UTR {utr_number} has already been credited. Skipping wallet update for payment ID {payment_id}.")
             
-            # 3. --- REFERRAL COMMISSION LOGIC ---
-            try:
-                referrer_response = supabase.table('profiles') \
-                                            .select('referrer_id') \
-                                            .eq('id', user_id) \
-                                            .single() \
-                                            .execute()
+            # This is the first time we're processing this UTR, so credit the user and mark the record.
+            elif not first_payment_processed:
+                # 1. Update the manual payment record to 'completed' and mark as credited
+                supabase.table('manual_payments') \
+                        .update({'status': 'completed', 'is_credited': True}) \
+                        .eq('id', payment_id) \
+                        .execute()
+                app_logger.info(f"Manual payment {utr_number} for user {user_id} marked as 'completed' and credited.")
                 
-                referrer_id = referrer_response.data.get('referrer_id') if referrer_response.data else None
-                
-                if referrer_id:
-                    app_logger.info(f"User {user_id} was referred by {referrer_id}. Calculating commission.")
-                    commission_amount = float(recharge_amount_inr) * 0.10
+                # 2. --- REFERRAL COMMISSION LOGIC --- (Keep as is)
+                try:
+                    referrer_response = supabase.table('profiles') \
+                                                .select('referrer_id') \
+                                                .eq('id', user_id) \
+                                                .single() \
+                                                .execute()
                     
-                    commission_rpc_response = supabase.rpc('increment_referral_commission', {
-                        'p_user_id': referrer_id,
-                        'p_amount': commission_amount
+                    referrer_id = referrer_response.data.get('referrer_id') if referrer_response.data else None
+                    
+                    if referrer_id:
+                        app_logger.info(f"User {user_id} was referred by {referrer_id}. Calculating commission.")
+                        commission_amount = float(recharge_amount_inr) * 0.10
+                        
+                        commission_rpc_response = supabase.rpc('increment_referral_commission', {
+                            'p_user_id': referrer_id,
+                            'p_amount': commission_amount
+                        }).execute()
+
+                        if commission_rpc_response.status_code == 204:
+                            app_logger.info(f"Commission of {commission_amount} credited to referrer {referrer_id}.")
+                            commission_log_data = {
+                                'referrer_id': referrer_id,
+                                'referred_user_id': user_id,
+                                'commission_amount': commission_amount,
+                                'investment_amount': float(recharge_amount_inr)
+                            }
+                            supabase.table('commissions').insert(commission_log_data).execute()
+                            app_logger.info(f"Commission log created for referrer {referrer_id}.")
+                        else:
+                            app_logger.error(f"Failed to credit commission for referrer {referrer_id}. RPC response: {commission_rpc_response.status_code}")
+
+                except Exception as commission_error:
+                    app_logger.error(f"Error processing referral commission for user {user_id} on manual payment: {commission_error}", exc_info=True)
+                
+                # 3. --- UPDATE USER'S WALLET --- (Keep as is)
+                try:
+                    rpc_response = supabase.rpc('increment_recharged_amount', {
+                        'p_user_id': user_id,
+                        'p_amount': float(recharge_amount_inr)  
                     }).execute()
+                    app_logger.info(f"Wallet 'recharged_amount' updated for user {user_id} via RPC.")
+                except Exception as rpc_exec_error:
+                    app_logger.error(f"Failed to execute RPC 'increment_recharged_amount' for {user_id}. Error: {rpc_exec_error}", exc_info=True)
+                    raise Exception("Supabase RPC 'increment_recharged_amount' failed...") from rpc_exec_error
 
-                    if commission_rpc_response.status_code == 204:
-                        app_logger.info(f"Commission of {commission_amount} credited to referrer {referrer_id}.")
-                        commission_log_data = {
-                            'referrer_id': referrer_id,
-                            'referred_user_id': user_id,
-                            'commission_amount': commission_amount,
-                            'investment_amount': float(recharge_amount_inr)
-                        }
-                        supabase.table('commissions').insert(commission_log_data).execute()
-                        app_logger.info(f"Commission log created for referrer {referrer_id}.")
-                    else:
-                        app_logger.error(f"Failed to credit commission for referrer {referrer_id}. RPC response: {commission_rpc_response.status_code}")
-
-            except Exception as commission_error:
-                app_logger.error(f"Error processing referral commission for user {user_id} on manual payment: {commission_error}", exc_info=True)
+                first_payment_processed = True
             
-            # 4. --- UPDATE USER'S WALLET ---
-            try:
-                rpc_response = supabase.rpc('increment_recharged_amount', {
-                    'p_user_id': user_id,
-                    'p_amount': float(recharge_amount_inr)  
-                }).execute()
-                app_logger.info(f"Wallet 'recharged_amount' updated for user {user_id} via RPC.")
-            except Exception as rpc_exec_error:
-                app_logger.error(f"Failed to execute RPC 'increment_recharged_amount' for {user_id}. Error: {rpc_exec_error}", exc_info=True)
-                raise Exception("Supabase RPC 'increment_recharged_amount' failed...") from rpc_exec_error
+            # For all subsequent pending requests with the same UTR, just mark them as completed
+            else:
+                supabase.table('manual_payments') \
+                        .update({'status': 'completed'}) \
+                        .eq('id', payment_id) \
+                        .execute()
+                app_logger.info(f"Manual payment {utr_number} for user {user_id} marked as 'completed' without crediting.")
+
 
         return jsonify({
             'success': True,
-            'message': 'Manual payments successfully verified and wallets updated.'
+            'message': 'Manual payments successfully verified and wallet credited once for this UTR.'
         }), 200
 
     except Exception as e:
