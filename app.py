@@ -1317,7 +1317,7 @@ def handle_withdrawal_request():
             return jsonify({'success': False, 'message': 'You can only withdraw twice per day.'}), 403
 
         # NEW: Check if the user has a successful investment before proceeding
-        investment_check_response = supabase.table('manual_payment').select('id').eq('user_id', user_id).eq('status', 'success').limit(1).execute()
+        investment_check_response = supabase.table('manual_payments').select('id').eq('user_id', user_id).eq('status', 'success').limit(1).execute()
         if not investment_check_response.data or len(investment_check_response.data) == 0:
             app_logger.warning(f"Withdrawal failed: User {user_id} has no successful investments.")
             return jsonify({'success': False, 'message': 'You must have a successful investment to withdraw.'}), 403
