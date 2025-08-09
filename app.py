@@ -15,6 +15,7 @@ from postgrest.exceptions import APIError
 import logging
 from functools import wraps # Ensure this is imported for @wraps
 import uuid # 
+import requests
 # Configure basic logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 app_logger = logging.getLogger(__name__)
@@ -667,7 +668,7 @@ def claim_referral_bonus():
 def confirm_manual_payment():
     """
     Endpoint for users to submit their manual UPI payment details (UTR, amount, mobile number)
-    for admin verification.
+    for admin verification. Now includes a Telegram notification.
     """
     data = request.get_json()
     user_id = data.get('userId')
@@ -694,18 +695,27 @@ def confirm_manual_payment():
             'status': 'pending'
         }
         
-        # Use a try-except block to handle potential errors from the Supabase client
         insert_response = supabase.table('manual_payments').insert(payment_data).execute()
         
         app_logger.info(f"Manual payment submitted for user {user_id} with UTR: {utr_number}")
 
+        # --- NEW: Send a Telegram notification to the admin ---
+        notification_message = (
+            f"🔔 <b>New Payment Submitted</b>\n"
+            f"<b>User ID:</b> <code>{user_id}</code>\n"
+            f"<b>Amount:</b> ₹{amount}\n"
+            f"<b>UTR:</b> <code>{utr_number}</code>\n"
+            f"Status: <b>Pending Admin Verification</b>"
+        )
+        send_telegram_notification(notification_message)
+        # ---------------------------------------------------
+
         return jsonify({
             'success': True,
             'message': 'Payment details submitted successfully. Awaiting admin verification.'
-        }), 201 # 201 Created
+        }), 201
 
     except Exception as e:
-        # This block will now correctly catch any errors, including Supabase API errors
         app_logger.error(f"Internal Server Error while confirming manual payment: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
 
@@ -877,18 +887,7 @@ def admin_verify_manual_payment():
                     app_logger.error(f"Failed to execute RPC 'increment_recharged_amount' for {user_id}. Error: {rpc_exec_error}", exc_info=True)
                     raise Exception("Supabase RPC 'increment_recharged_amount' failed...") from rpc_exec_error
 
-                # --- NEW: Send Telegram notification to admin ---
-                
-                notification_message = (
-                    f"✅ <b>Payment Verified!</b>\n"
-                    f"<b>User ID:</b> <code>{user_id}</code>\n"
-                    f"<b>Amount:</b> ₹{recharge_amount_inr}\n"
-                    f"<b>UTR:</b> <code>{utr_number}</code>\n"
-                    f"Wallet credited successfully."
-                )
-                app_logger.info("Attempting to send Telegram notification...")
-                send_telegram_notification(notification_message)
-                app_logger.info("Telegram notification function was called.")
+            
                 # -----------------------------------------------
 
                 first_payment_processed = True
