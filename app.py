@@ -1407,6 +1407,9 @@ def handle_withdrawal_request():
 
         app_logger.info(f"Withdrawal request recorded as pending for user {user_id}. Transaction ID: {transaction_response.data[0]['id']}")
 
+        account_number = bank_details.get('accountNumber', 'N/A')
+        bank_name = bank_details.get('bankName', 'N/A')
+
         # --- NEW: Send Telegram notification for withdrawal request ---
         notification_message = (
             f"💸 <b>New Withdrawal Request!</b>\n"
