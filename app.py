@@ -262,7 +262,8 @@ def process_withdrawal_action():
         return redirect(url_for('admin_dashboard'))
 
     # Map action to status for the API endpoint
-    new_status = 'completed' if action == 'complete' else 'rejected' if action == 'reject' else None
+    # new_status = 'completed' if action == 'complete' else 'rejected' if action == 'reject' else None
+    new_status = 'completed' if action == 'complete' else 'failed' if action == 'reject' else None
 
     if not new_status:
         flash('Invalid action specified.', 'danger')
