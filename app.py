@@ -1321,13 +1321,12 @@ def check_successful_investment():
         app_logger.error(f"Error checking for successful investment for user {user_id}: {e}", exc_info=True)
         return jsonify({'hasInvested': False}), 500
 
-# --- Updated withdrawal request handler ---
 @app.route('/api/withdrawal/request', methods=['POST'])
 def handle_withdrawal_request():
     try:
         data = request.json
         user_id = data.get('userId')
-        amount = data.get('amount')  # Amount in INR
+        amount = data.get('amount')
         bank_card_id = data.get('bankCardId')
         bank_details = data.get('bankDetails')
 
@@ -1349,11 +1348,11 @@ def handle_withdrawal_request():
 
         # NEW: Check if the user has a successful investment before proceeding
         investment_check_response = supabase.table('manual_payments') \
-    .select('id') \
-    .eq('user_id', user_id) \
-    .in_('status', ['success', 'completed']) \
-    .limit(1) \
-    .execute()
+                                            .select('id') \
+                                            .eq('user_id', user_id) \
+                                            .in_('status', ['success', 'completed']) \
+                                            .limit(1) \
+                                            .execute()
         if not investment_check_response.data or len(investment_check_response.data) == 0:
             app_logger.warning(f"Withdrawal failed: User {user_id} has no successful investments.")
             return jsonify({'success': False, 'message': 'You must have a successful investment to withdraw.'}), 403
@@ -1382,7 +1381,7 @@ def handle_withdrawal_request():
         wallet_update_response = supabase.table('user_wallets').update({'order_income': new_order_income}).eq('user_id', user_id).execute()
 
         if not wallet_update_response.data or len(wallet_update_response.data) == 0:
-            app_logger.error(f"Failed to update wallet balance for withdrawal for user {user_id}. Supabase response: {wallet_update_response.error if hasattr(wallet_update_response, 'error') else 'No data or error'}")
+            app_logger.error(f"Failed to update wallet balance for withdrawal for user {user_id}.")
             return jsonify({'success': False, 'message': 'Failed to update wallet balance for withdrawal.'}), 500
 
         app_logger.info(f"Wallet updated for {user_id}. New order income: {new_order_income}. Recording withdrawal request.")
@@ -1407,6 +1406,18 @@ def handle_withdrawal_request():
             return jsonify({'success': False, 'message': 'Failed to record withdrawal request. Amount refunded to wallet. Please try again or contact support.'}), 500
 
         app_logger.info(f"Withdrawal request recorded as pending for user {user_id}. Transaction ID: {transaction_response.data[0]['id']}")
+
+        # --- NEW: Send Telegram notification for withdrawal request ---
+        notification_message = (
+            f"💸 <b>New Withdrawal Request!</b>\n"
+            f"<b>User ID:</b> <code>{user_id}</code>\n"
+            f"<b>Amount:</b> ₹{total_amount_to_deduct}\n"
+            f"<b>Withdrawal Fee:</b> ₹{withdrawal_fee}\n"
+            f"<b>Bank Account:</b> {bank_details.get('bankName')} ending in {bank_details.get('accountNumber')[-4:]}\n"
+            f"Status: <b>Pending Admin Approval</b>"
+        )
+        send_telegram_notification(notification_message)
+        # -------------------------------------------------------------
 
         return jsonify({
             'success': True,
