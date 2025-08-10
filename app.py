@@ -1416,7 +1416,6 @@ def handle_withdrawal_request():
             f"<b>User ID:</b> <code>{user_id}</code>\n"
             f"<b>Amount:</b> ₹{total_amount_to_deduct}\n"
             f"<b>Withdrawal Fee:</b> ₹{withdrawal_fee}\n"
-            f"<b>Bank Account:</b> {bank_details.get('bankName')} ending in {bank_details.get('accountNumber')[-4:]}\n"
             f"Status: <b>Pending Admin Approval</b>"
         )
         send_telegram_notification(notification_message)
