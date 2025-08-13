@@ -1,6 +1,6 @@
 # app.py
 
-from datetime import datetime, date, timedelta, timezone
+import datetime
 import os
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
 from flask_cors import CORS
@@ -1335,7 +1335,7 @@ def handle_withdrawal_request():
             return jsonify({'success': False, 'message': 'Invalid withdrawal amount.'}), 400
 
         # NEW: Check for withdrawal frequency
-        today = date.today()
+        today = datetime.date.today()
         start_of_day = datetime.datetime.combine(today, datetime.time.min, tzinfo=datetime.timezone.utc)
         
         withdrawal_count_response = supabase.table('transactions').select('id').eq('user_id', user_id).eq('type', 'withdrawal').gt('created_at', start_of_day.isoformat()).execute()
