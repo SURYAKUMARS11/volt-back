@@ -1,6 +1,6 @@
 # app.py
 
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, date, timedelta, timezone
 import os
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
 from flask_cors import CORS
