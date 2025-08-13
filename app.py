@@ -520,7 +520,7 @@ def get_team_data(user_id):
         return jsonify({'error': 'Backend setup issue: Supabase client not initialized'}), 500
 
     try:
-        # 1. Fetch total referrals and member data
+        # 1. Fetch all referred users in a single query
         referred_users_response = supabase.table('profiles') \
             .select('id, nickname, phone_number') \
             .eq('referrer_id', user_id) \
@@ -529,7 +529,34 @@ def get_team_data(user_id):
         referred_users = referred_users_response.data if referred_users_response.data else []
         total_referrals = len(referred_users)
 
-        # 2. Fetch total earnings from the user's wallet
+        # 2. Get a list of all referred user IDs for the next step
+        referred_user_ids = [member['id'] for member in referred_users]
+
+        # 3. Fetch all completed transactions for ALL referred users in ONE query
+        # This is the key change that solves the performance issue.
+        recharge_tx_response = supabase.table('transactions') \
+            .select('user_id') \
+            .in_('user_id', referred_user_ids) \
+            .eq('type', 'recharge') \
+            .eq('status', 'completed') \
+            .execute()
+
+        # 4. Fetch all completed manual payments for ALL referred users in ONE query
+        manual_payment_response = supabase.table('manual_payments') \
+            .select('user_id') \
+            .in_('user_id', referred_user_ids) \
+            .eq('status', 'completed') \
+            .execute()
+
+        # 5. Create a set of all active user IDs for fast lookup
+        # Sets provide O(1) average time complexity for checking if an item exists
+        active_user_ids = set()
+        for tx in recharge_tx_response.data:
+            active_user_ids.add(tx['user_id'])
+        for payment in manual_payment_response.data:
+            active_user_ids.add(payment['user_id'])
+
+        # 6. Fetch total earnings from the user's wallet
         wallet_data_response = supabase.table('user_wallets') \
             .select('total_referral_earnings') \
             .eq('user_id', user_id) \
@@ -540,34 +567,11 @@ def get_team_data(user_id):
         if wallet_data_response.data:
             total_earnings = wallet_data_response.data.get('total_referral_earnings', 0.0)
 
-        # 3. Process the list of team members and determine their status
+        # 7. Build the final response list by iterating ONCE and using the lookup set
         team_members_list = []
         for member in referred_users:
             member_id = member['id']
-
-            # --- MODIFIED LOGIC HERE ---
-            # Check for completed transactions in the 'transactions' table (Razorpay)
-            recharge_tx_response = supabase.table('transactions') \
-                .select('id') \
-                .eq('user_id', member_id) \
-                .eq('type', 'recharge') \
-                .eq('status', 'completed') \
-                .limit(1) \
-                .execute()
-            
-            is_active = len(recharge_tx_response.data) > 0
-
-            # If no Razorpay transaction found, check the 'manual_payments' table
-            if not is_active:
-                manual_payment_response = supabase.table('manual_payments') \
-                    .select('id') \
-                    .eq('user_id', member_id) \
-                    .eq('status', 'completed') \
-                    .limit(1) \
-                    .execute()
-                
-                is_active = len(manual_payment_response.data) > 0
-            # --- END MODIFIED LOGIC ---
+            is_active = member_id in active_user_ids
             
             team_members_list.append({
                 'name': member.get('nickname', 'Unnamed User'),
@@ -575,7 +579,6 @@ def get_team_data(user_id):
                 'status': 'active' if is_active else 'inactive'
             })
 
-        # 4. Construct and return the final response
         return jsonify({
             'success': True,
             'totalReferrals': total_referrals,
@@ -586,6 +589,7 @@ def get_team_data(user_id):
     except Exception as e:
         app_logger.error(f"Error fetching team data for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred while fetching team data.'}), 500
+
 
 @app.route('/api/user/claim-daily-bonus', methods=['POST'])
 def claim_daily_bonus():
