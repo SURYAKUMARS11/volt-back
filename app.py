@@ -587,83 +587,80 @@ def get_team_data(user_id):
         app_logger.error(f"Error fetching team data for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred while fetching team data.'}), 500
 
-# --- MODIFIED: Claim Referral Bonus (₹10 per sign-up) ---
-@app.route('/api/user/claim-referral-bonus', methods=['POST'])
-def claim_referral_bonus():
+# --- NEW: Daily Login Bonus (₹5 per day) ---
+@app.route('/api/user/claim-daily-bonus', methods=['POST'])
+def claim_daily_bonus():
     if not supabase:
-        app_logger.error("Supabase client not initialized in claim_referral_bonus.")
+        app_logger.error("Supabase client not initialized in claim_daily_bonus.")
         return jsonify({'success': False, 'message': 'Backend setup issue: Supabase client not initialized.'}), 500
-    
+
     data = request.json
     user_id = data.get('userId')
 
     if not user_id:
         return jsonify({'success': False, 'message': 'User ID is required.'}), 400
 
+    DAILY_BONUS_AMOUNT = 5.0
+    
     try:
-        # Fetch current pending bonus and wallet balance
-        # --- MODIFIED: Added 'order_income' to the select statement ---
+        # Fetch user wallet and last claim date
         wallet_response = supabase.table('user_wallets') \
-                                 .select('balance, pending_referral_bonus, total_referral_earnings, order_income') \
+                                 .select('balance, total_daily_earnings, last_daily_bonus_claim_date') \
                                  .eq('user_id', user_id) \
                                  .single() \
                                  .execute()
-        
+
         if not wallet_response.data:
             return jsonify({'success': False, 'message': 'User wallet not found.'}), 404
 
-        current_balance = wallet_response.data['balance']
-        pending_bonus = wallet_response.data['pending_referral_bonus']
-        total_referral_earnings = wallet_response.data['total_referral_earnings']
-        current_order_income = wallet_response.data['order_income'] # --- NEW: Fetch current order_income ---
+        wallet_data = wallet_response.data
+        current_balance = wallet_data['balance']
+        total_daily_earnings = wallet_data['total_daily_earnings']
+        last_claim_date_str = wallet_data['last_daily_bonus_claim_date']
 
-        if pending_bonus <= 0:
-            return jsonify({'success': False, 'message': 'No pending bonus to claim.'}), 400
+        # Get today's date in a comparable format (e.g., YYYY-MM-DD)
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # Check if bonus has already been claimed today
+        if last_claim_date_str == today:
+            return jsonify({'success': False, 'message': 'Daily bonus already claimed today.'}), 400
 
         # Calculate new balances
-        amount_to_claim = pending_bonus
-        new_balance = current_balance + amount_to_claim
-        new_total_referral_earnings = total_referral_earnings + amount_to_claim
-        new_order_income = current_order_income + amount_to_claim # --- NEW: Calculate new order_income ---
+        new_balance = current_balance + DAILY_BONUS_AMOUNT
+        new_total_daily_earnings = total_daily_earnings + DAILY_BONUS_AMOUNT
 
-        # Update wallet: add to balance, reset pending, update total earned and order_income
-        # --- MODIFIED: Added 'order_income' to the update dictionary ---
+        # Update wallet: add to balance, update total earnings, and set last claim date
         update_wallet_response = supabase.table('user_wallets').update({
             'balance': new_balance,
-            'pending_referral_bonus': 0.0,
-            'total_referral_earnings': new_total_referral_earnings,
-            'order_income': new_order_income
+            'total_daily_earnings': new_total_daily_earnings,
+            'last_daily_bonus_claim_date': today
         }).eq('user_id', user_id).execute()
 
         if not update_wallet_response.data:
-            app_logger.error(f"Failed to update wallet for claiming referral bonus for user {user_id}. Supabase error: {update_wallet_response.error}")
+            app_logger.error(f"Failed to update wallet for claiming daily bonus for user {user_id}. Supabase error: {update_wallet_response.error}")
             return jsonify({'success': False, 'message': 'Failed to update wallet after claiming bonus.'}), 500
 
-        # Record a transaction for the bonus claim
+        # Record a transaction
         transaction_data = {
             'user_id': user_id,
-            'amount': amount_to_claim,
-            'type': 'bonus_referral_signup',
+            'amount': DAILY_BONUS_AMOUNT,
+            'type': 'daily_login_bonus',
             'status': 'completed',
-            'description': f'Claimed ₹{amount_to_claim} referral signup bonus'
+            'description': f'Claimed ₹{DAILY_BONUS_AMOUNT} daily login bonus'
         }
-        supabase.table('transactions').insert(transaction_data).execute() # Log this, but don't block response on it
+        supabase.table('transactions').insert(transaction_data).execute()
 
-        app_logger.info(f"User {user_id} claimed ₹{amount_to_claim} referral bonus.")
-        # --- MODIFIED: Added 'new_order_income' to the response ---
+        app_logger.info(f"User {user_id} claimed ₹{DAILY_BONUS_AMOUNT} daily bonus.")
         return jsonify({
             'success': True,
-            'message': f'₹{amount_to_claim} referral bonus claimed successfully!',
+            'message': f'₹{DAILY_BONUS_AMOUNT} daily bonus claimed successfully!',
             'new_balance': new_balance,
-            'new_pending_bonus': 0.0,
-            'new_total_referral_earnings': new_total_referral_earnings,
-            'new_order_income': new_order_income
+            'new_total_daily_earnings': new_total_daily_earnings
         }), 200
 
     except Exception as e:
-        app_logger.error(f"Error claiming referral bonus for user {user_id}: {e}", exc_info=True)
+        app_logger.error(f"Error claiming daily bonus for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred while claiming bonus.'}), 500
-
 
 @app.route('/api/manual-payment/confirm', methods=['POST'])
 def confirm_manual_payment():
