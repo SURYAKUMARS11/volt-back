@@ -341,7 +341,7 @@ def redeem_gift_code():
             return jsonify({'success': False, 'message': 'You have already redeemed this gift code.'}), 403
 
         # Step 3: Generate a random amount between 5 and 10 and update the user's wallet
-        amount_to_add = random.uniform(5.00, 30.00)
+        amount_to_add = random.uniform(5.00, 10.00)
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         
         wallet_response = supabase.table('user_wallets') \
@@ -366,6 +366,7 @@ def redeem_gift_code():
         supabase.table('redeemed_gift_codes').insert({
             'user_id': user_id,
             'code_id': code_id,
+            'claimed_amount': amount_to_add, # <-- NEW LINE ADDED HERE
             'redeemed_at': now_utc.isoformat()
         }).execute()
         
@@ -387,7 +388,6 @@ def redeem_gift_code():
     except Exception as e:
         app_logger.error(f"Error redeeming gift code '{gift_code_string}' for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
-
 
 
 # --- EXISTING ROUTES (as provided in your context) ---
