@@ -341,7 +341,7 @@ def redeem_gift_code():
             return jsonify({'success': False, 'message': 'You have already redeemed this gift code.'}), 403
 
         # Step 3: Generate a random amount between 5 and 10 and update the user's wallet
-        amount_to_add = random.uniform(5.00, 10.00)
+        amount_to_add = random.uniform(5.00, 30.00)
         now_utc = datetime.datetime.now(datetime.timezone.utc)
         
         wallet_response = supabase.table('user_wallets') \
