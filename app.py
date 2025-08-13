@@ -1,6 +1,6 @@
 # app.py
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
 from flask_cors import CORS
@@ -587,80 +587,63 @@ def get_team_data(user_id):
         app_logger.error(f"Error fetching team data for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred while fetching team data.'}), 500
 
-# --- NEW: Daily Login Bonus (₹5 per day) ---
 @app.route('/api/user/claim-daily-bonus', methods=['POST'])
 def claim_daily_bonus():
-    if not supabase:
-        app_logger.error("Supabase client not initialized in claim_daily_bonus.")
-        return jsonify({'success': False, 'message': 'Backend setup issue: Supabase client not initialized.'}), 500
-
-    data = request.json
+    data = request.get_json()
     user_id = data.get('userId')
-
+    
     if not user_id:
-        return jsonify({'success': False, 'message': 'User ID is required.'}), 400
-
-    DAILY_BONUS_AMOUNT = 5.0
+        return jsonify({'success': False, 'message': 'User ID is required'}), 400
     
     try:
-        # Fetch user wallet and last claim date
-        wallet_response = supabase.table('user_wallets') \
-                                 .select('balance, total_daily_earnings, last_daily_bonus_claim_date') \
-                                 .eq('user_id', user_id) \
-                                 .single() \
-                                 .execute()
+        # Check the user's last claim date
+        response = supabase.table('user_wallets') \
+            .select('total_daily_earnings, last_daily_bonus_claim_date') \
+            .eq('user_id', user_id) \
+            .single() \
+            .execute()
 
-        if not wallet_response.data:
-            return jsonify({'success': False, 'message': 'User wallet not found.'}), 404
-
-        wallet_data = wallet_response.data
-        current_balance = wallet_data['balance']
-        total_daily_earnings = wallet_data['total_daily_earnings']
-        last_claim_date_str = wallet_data['last_daily_bonus_claim_date']
-
-        # Get today's date in a comparable format (e.g., YYYY-MM-DD)
-        today = datetime.now().strftime('%Y-%m-%d')
+        wallet_data = response.data
+        last_claim_date_str = wallet_data.get('last_daily_bonus_claim_date')
         
-        # Check if bonus has already been claimed today
-        if last_claim_date_str == today:
-            return jsonify({'success': False, 'message': 'Daily bonus already claimed today.'}), 400
+        # Determine if the user can claim today
+        # Check if last claim was more than 24 hours ago
+        can_claim = True
+        if last_claim_date_str:
+            last_claim_datetime = datetime.fromisoformat(last_claim_date_str)
+            if datetime.utcnow() - last_claim_datetime < timedelta(hours=24):
+                can_claim = False
 
-        # Calculate new balances
-        new_balance = current_balance + DAILY_BONUS_AMOUNT
-        new_total_daily_earnings = total_daily_earnings + DAILY_BONUS_AMOUNT
+        if not can_claim:
+            return jsonify({
+                'success': False,
+                'message': 'Bonus has already been claimed within the last 24 hours.'
+            }), 403
 
-        # Update wallet: add to balance, update total earnings, and set last claim date
-        update_wallet_response = supabase.table('user_wallets').update({
-            'balance': new_balance,
-            'total_daily_earnings': new_total_daily_earnings,
-            'last_daily_bonus_claim_date': today
-        }).eq('user_id', user_id).execute()
-
-        if not update_wallet_response.data:
-            app_logger.error(f"Failed to update wallet for claiming daily bonus for user {user_id}. Supabase error: {update_wallet_response.error}")
-            return jsonify({'success': False, 'message': 'Failed to update wallet after claiming bonus.'}), 500
-
-        # Record a transaction
-        transaction_data = {
-            'user_id': user_id,
-            'amount': DAILY_BONUS_AMOUNT,
-            'type': 'daily_login_bonus',
-            'status': 'completed',
-            'description': f'Claimed ₹{DAILY_BONUS_AMOUNT} daily login bonus'
+        # Update the wallet with the new bonus
+        today = datetime.utcnow().isoformat()
+        daily_bonus_amount = 5.00 # Or whatever your daily bonus is
+        
+        updated_data = {
+            'total_daily_earnings': wallet_data['total_daily_earnings'] + daily_bonus_amount,
+            'last_daily_bonus_claim_date': today,
+            'balance': wallet_data['balance'] + daily_bonus_amount
         }
-        supabase.table('transactions').insert(transaction_data).execute()
 
-        app_logger.info(f"User {user_id} claimed ₹{DAILY_BONUS_AMOUNT} daily bonus.")
+        supabase.table('user_wallets') \
+            .update(updated_data) \
+            .eq('user_id', user_id) \
+            .execute()
+            
         return jsonify({
             'success': True,
-            'message': f'₹{DAILY_BONUS_AMOUNT} daily bonus claimed successfully!',
-            'new_balance': new_balance,
-            'new_total_daily_earnings': new_total_daily_earnings
-        }), 200
+            'message': f'Daily bonus of ₹{daily_bonus_amount} claimed successfully!',
+            'new_total_daily_earnings': updated_data['total_daily_earnings']
+        })
 
     except Exception as e:
-        app_logger.error(f"Error claiming daily bonus for user {user_id}: {e}", exc_info=True)
-        return jsonify({'success': False, 'message': 'An unexpected error occurred while claiming bonus.'}), 500
+        print(f"Error claiming daily bonus for user {user_id}: {e}")
+        return jsonify({'success': False, 'message': 'An error occurred while claiming the bonus.'}), 500
 
 @app.route('/api/manual-payment/confirm', methods=['POST'])
 def confirm_manual_payment():
