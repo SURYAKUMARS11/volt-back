@@ -1,6 +1,7 @@
 # app.py
 
 import datetime
+import random
 import os
 from flask import Flask, request, jsonify, render_template, redirect, url_for, session, flash
 from flask_cors import CORS
@@ -303,6 +304,90 @@ def admin_recharge_dashboard():
     This route must be protected with admin authentication.
     """
     return render_template('recharge_admin.html')
+
+
+
+@app.route('/api/gift-code/redeem', methods=['POST'])
+def redeem_gift_code():
+    data = request.get_json()
+    user_id = data.get('userId')
+    gift_code_string = data.get('giftCode')
+
+    if not user_id or not gift_code_string:
+        return jsonify({'success': False, 'message': 'User ID and gift code are required.'}), 400
+
+    try:
+        # Step 1: Check if the gift code exists and is active
+        gift_code_response = supabase.table('gift_codes') \
+            .select('id, is_active') \
+            .eq('code', gift_code_string) \
+            .single() \
+            .execute()
+
+        if not gift_code_response.data or not gift_code_response.data.get('is_active'):
+            return jsonify({'success': False, 'message': 'Invalid or inactive gift code.'}), 404
+
+        code_id = gift_code_response.data['id']
+
+        # Step 2: Check if the user has already redeemed this specific code
+        redemption_response = supabase.table('redeemed_gift_codes') \
+            .select('id') \
+            .eq('user_id', user_id) \
+            .eq('code_id', code_id) \
+            .limit(1) \
+            .execute()
+        
+        if len(redemption_response.data) > 0:
+            return jsonify({'success': False, 'message': 'You have already redeemed this gift code.'}), 403
+
+        # Step 3: Generate a random amount between 5 and 10 and update the user's wallet
+        amount_to_add = random.uniform(5.00, 10.00)
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        
+        wallet_response = supabase.table('user_wallets') \
+            .select('order_income') \
+            .eq('user_id', user_id) \
+            .single() \
+            .execute()
+        
+        current_order_income = wallet_response.data['order_income'] if wallet_response.data else 0
+
+        updated_wallet_data = {
+            'order_income': current_order_income + amount_to_add
+        }
+
+        supabase.table('user_wallets') \
+            .update(updated_wallet_data) \
+            .eq('user_id', user_id) \
+            .execute()
+
+        # Step 4: Record the redemption and transaction
+        # Record the redemption to prevent reuse
+        supabase.table('redeemed_gift_codes').insert({
+            'user_id': user_id,
+            'code_id': code_id,
+            'redeemed_at': now_utc.isoformat()
+        }).execute()
+        
+        # Add a transaction record
+        supabase.table('transactions').insert({
+            'user_id': user_id,
+            'amount': amount_to_add,
+            'type': 'gift_code_redemption',
+            'status': 'completed',
+            'created_at': now_utc.isoformat()
+        }).execute()
+
+        return jsonify({
+            'success': True,
+            'message': f'Gift code redeemed! You received ₹{amount_to_add:.2f}.',
+            'amount': amount_to_add
+        }), 200
+
+    except Exception as e:
+        app_logger.error(f"Error redeeming gift code '{gift_code_string}' for user {user_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
+
 
 
 # --- EXISTING ROUTES (as provided in your context) ---
