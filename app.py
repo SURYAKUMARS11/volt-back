@@ -678,6 +678,19 @@ def get_team_data(user_id):
 
 @app.route('/api/user/claim-daily-bonus', methods=['POST'])
 def claim_daily_bonus():
+    """
+    Handles a user's request to claim their daily login bonus.
+    The bonus is a fixed amount of ₹5.00, and it can only be claimed once every 24 hours.
+    
+    This function performs the following steps:
+    1. Validates the user ID from the request payload.
+    2. Fetches the user's wallet data from the 'user_wallets' table to check the last claim date.
+    3. Compares the last claim date with the current time to ensure at least 24 hours have passed.
+    4. If the user is eligible, it updates the user's wallet by adding the bonus to 'order_income' and 'total_daily_earnings'.
+    5. It also updates the 'last_daily_bonus_claim_date' with the current UTC timestamp.
+    6. A transaction record with type 'daily_login_bonus' is inserted into the 'transactions' table.
+    7. Returns a JSON response indicating success or failure.
+    """
     data = request.get_json()
     user_id = data.get('userId')
     
@@ -685,27 +698,25 @@ def claim_daily_bonus():
         return jsonify({'success': False, 'message': 'User ID is required'}), 400
     
     try:
-        response = supabase.table('user_wallets') \
-            .select('total_daily_earnings, last_daily_bonus_claim_date, balance') \
+        # Define the bonus amount and current UTC time
+        daily_bonus_amount = 5.00
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        
+        # Fetch the user's wallet data to check their last claim date, including order_income
+        wallet_response = supabase.table('user_wallets') \
+            .select('order_income, total_daily_earnings, last_daily_bonus_claim_date') \
             .eq('user_id', user_id) \
             .single() \
             .execute()
 
-        wallet_data = response.data
+        wallet_data = wallet_response.data
         last_claim_date_str = wallet_data.get('last_daily_bonus_claim_date')
         
-        # Determine if the user can claim today
+        # Check if the user can claim today
         can_claim = True
-        
-        # Get the current time in UTC, which is timezone-aware
-        now_utc = datetime.now(timezone.utc)
-        
         if last_claim_date_str:
-            # Parse the last claim date from the database as a timezone-aware datetime
-            last_claim_datetime = datetime.fromisoformat(last_claim_date_str)
-            
-            # Now both datetimes are timezone-aware and can be compared
-            if now_utc - last_claim_datetime < timedelta(hours=24):
+            last_claim_datetime = datetime.datetime.fromisoformat(last_claim_date_str)
+            if now_utc - last_claim_datetime < datetime.timedelta(hours=24):
                 can_claim = False
 
         if not can_claim:
@@ -714,17 +725,20 @@ def claim_daily_bonus():
                 'message': 'Bonus has already been claimed within the last 24 hours.'
             }), 403
 
-        # Update the wallet with the new bonus
-        daily_bonus_amount = 5.00
-        
+        # Update the user's wallet with the new bonus, adding to 'order_income'
+        current_order_income = wallet_data.get('order_income', 0)
         updated_data = {
+            'order_income': current_order_income + daily_bonus_amount,
             'total_daily_earnings': wallet_data['total_daily_earnings'] + daily_bonus_amount,
-            # Store the new claim time in UTC ISO format
-            'last_daily_bonus_claim_date': now_utc.isoformat(), 
-            'balance': wallet_data['balance'] + daily_bonus_amount
+            'last_daily_bonus_claim_date': now_utc.isoformat(),
         }
 
-        # Create a transaction record
+        supabase.table('user_wallets') \
+            .update(updated_data) \
+            .eq('user_id', user_id) \
+            .execute()
+        
+        # Insert a transaction record
         transaction_data = {
             'user_id': user_id,
             'amount': daily_bonus_amount,
@@ -732,25 +746,20 @@ def claim_daily_bonus():
             'status': 'completed',
             'created_at': now_utc.isoformat(),
         }
-
-        # Update the user's wallet
-        supabase.table('user_wallets') \
-            .update(updated_data) \
-            .eq('user_id', user_id) \
-            .execute()
-        
-        # Insert the new transaction record
         supabase.table('transactions').insert(transaction_data).execute()
-        
+            
         return jsonify({
             'success': True,
             'message': f'Daily bonus of ₹{daily_bonus_amount} claimed successfully!',
             'new_total_daily_earnings': updated_data['total_daily_earnings']
-        })
+        }), 200
 
     except Exception as e:
-        print(f"Error claiming daily bonus for user {user_id}: {e}")
-        return jsonify({'success': False, 'message': 'An error occurred while claiming the bonus.'}), 500
+        app_logger.error(f"Error claiming daily bonus for user {user_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'An unexpected error occurred while claiming the bonus.'}), 500
+
+
+
 @app.route('/api/manual-payment/confirm', methods=['POST'])
 def confirm_manual_payment():
     """
