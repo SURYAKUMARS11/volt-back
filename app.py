@@ -1438,9 +1438,9 @@ def handle_withdrawal_request():
         
         withdrawal_count_response = supabase.table('transactions').select('id').eq('user_id', user_id).eq('type', 'withdrawal').gt('created_at', start_of_day.isoformat()).execute()
         
-        if withdrawal_count_response.data and len(withdrawal_count_response.data) >= 2:
+        if withdrawal_count_response.data and len(withdrawal_count_response.data) >= 1:
             app_logger.warning(f"Withdrawal failed: User {user_id} has exceeded the daily withdrawal limit.")
-            return jsonify({'success': False, 'message': 'You can only withdraw twice per day.'}), 403
+            return jsonify({'success': False, 'message': 'You can only withdraw once per day.'}), 403
 
         # NEW: Check if the user has a successful investment before proceeding
         investment_check_response = supabase.table('manual_payments') \
