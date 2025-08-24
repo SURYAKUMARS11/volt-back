@@ -1417,7 +1417,7 @@ def check_successful_investment():
         app_logger.error(f"Error checking for successful investment for user {user_id}: {e}", exc_info=True)
         return jsonify({'hasInvested': False}), 500
 
-@app.route('/api/withdrawal/request', methods=['POST'])
+@app.route('/api/withdrawal/requestno', methods=['POST'])
 def handle_withdrawal_request():
     try:
         data = request.json
