@@ -114,17 +114,22 @@
                                     Proof ID: {{ proof.id }}
                                 </div>
                                 <div class="card-body">
-                                    <img src="{{ proof.image_url }}" alt="Withdrawal Proof" class="proof-image">
-                                    <p><strong>User ID:</strong> {{ proof.user_id }}</p>
-                                    <p><strong>Phone Number:</strong> {{ proof.phone_number }}</p>
-                                    <p><strong>Comment:</strong> {{ proof.comment if proof.comment else 'N/A' }}</p>
-                                    <p><strong>Submitted On:</strong> {{ proof.created_at }}</p>
-                                    <form action="{{ url_for('approve_withdrawal_proof') }}" method="POST">
-                                        <input type="hidden" name="proof_id" value="{{ proof.id }}">
-                                        <input type="hidden" name="user_id" value="{{ proof.user_id }}">
-                                        <button type="submit" class="btn btn-success btn-block">Approve (Add 20 Rs)</button>
-                                    </form>
-                                </div>
+    {% for url in proof.image_urls %}
+        <a href="{{ url }}" target="_blank"> 
+            <img src="{{ url }}" alt="Withdrawal Proof {{ loop.index }}" class="proof-image">
+        </a>
+    {% endfor %}
+    
+    <p><strong>User ID:</strong> {{ proof.user_id }}</p>
+    <p><strong>Phone Number:</strong> {{ proof.phone_number }}</p>
+    <p><strong>Comment:</strong> {{ proof.comment if proof.comment else 'N/A' }}</p>
+    <p><strong>Submitted On:</strong> {{ proof.created_at }}</p>
+    <form action="{{ url_for('approve_withdrawal_proof') }}" method="POST">
+        <input type="hidden" name="proof_id" value="{{ proof.id }}">
+        <input type="hidden" name="user_id" value="{{ proof.user_id }}">
+        <button type="submit" class="btn btn-success btn-block">Approve (Add 20 Rs)</button>
+    </form>
+</div>
                             </div>
                         </div>
                     {% endfor %}
