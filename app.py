@@ -389,9 +389,9 @@ def redeem_gift_code():
         app_logger.error(f"Error redeeming gift code '{gift_code_string}' for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
 
+SUPABASE_URL = "https://uccvtnsvkihfankviyuk.supabase.co" 
+STORAGE_BUCKET_NAME = "withdrawal-proof"
 
-
-# --- ADMIN PROOF WALL ROUTES ---
 @app.route('/admin/proofs', methods=['GET'])
 @admin_required
 def admin_proof_wall():
@@ -400,22 +400,30 @@ def admin_proof_wall():
         return render_template('admin_proof_wall.html', proofs=[], error='Backend setup issue.')
 
     try:
-        # Fetch pending withdrawal proofs and explicitly join using 'user_id' which is assumed to be the FK
-        # The syntax is 'relation_name!foreign_key_column_name!join_type(columns_to_select)'
+        # 1. Fetch data with the corrected join (profiles!user_id!inner)
         response = supabase.table('withdrawal_proofs') \
             .select('*, profiles!user_id!inner(phone_number)') \
             .eq('status', 'pending') \
             .order('created_at', desc=True) \
             .execute()
-        
-        # ... rest of your function remains the same ...
+
         if response.data:
             pending_proofs = []
+            
+            # 2. Define the Base Public URL using your project info and bucket name
+            # Format: https://<PROJECT_REF>.supabase.co/storage/v1/object/public/<BUCKET_NAME>/
+            BASE_PUBLIC_URL = f"{SUPABASE_URL}/storage/v1/object/public/{STORAGE_BUCKET_NAME}/"
+            
             for item in response.data:
+                # 3. Construct the full image URL by combining the base URL and the path stored in the database
+                # item['image_url'] should contain the file path (e.g., 'user_123/proof_1.jpg')
+                full_image_url = BASE_PUBLIC_URL + item['image_url']
+                
                 pending_proofs.append({
                     'id': item['id'],
                     'user_id': item['user_id'],
-                    'image_url': item['image_url'],
+                    # Use the constructed full URL
+                    'image_url': full_image_url, 
                     'comment': item['comment'],
                     'phone_number': item['profiles']['phone_number'],
                     'created_at': item['created_at']
@@ -428,6 +436,7 @@ def admin_proof_wall():
         app_logger.error(f"Error fetching pending withdrawal proofs for admin: {e}", exc_info=True)
         flash(f'Error fetching proofs: {e}', 'danger')
         return render_template('admin_proof_wall.html', proofs=[], error='Error fetching data.')
+
 
 @app.route('/admin/proofs/approve', methods=['POST'])
 @admin_required
