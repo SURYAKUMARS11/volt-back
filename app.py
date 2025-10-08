@@ -400,13 +400,15 @@ def admin_proof_wall():
         return render_template('admin_proof_wall.html', proofs=[], error='Backend setup issue.')
 
     try:
-        # Fetch pending withdrawal proofs and join with profiles to get user info
+        # Fetch pending withdrawal proofs and explicitly join using 'user_id' which is assumed to be the FK
+        # The syntax is 'relation_name!foreign_key_column_name!join_type(columns_to_select)'
         response = supabase.table('withdrawal_proofs') \
-            .select('*, profiles!inner(phone_number)') \
+            .select('*, profiles!user_id!inner(phone_number)') \
             .eq('status', 'pending') \
             .order('created_at', desc=True) \
             .execute()
-
+        
+        # ... rest of your function remains the same ...
         if response.data:
             pending_proofs = []
             for item in response.data:
