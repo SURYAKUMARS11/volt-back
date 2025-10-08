@@ -396,56 +396,70 @@ STORAGE_BUCKET_NAME = "withdrawal-proof"
 @app.route('/admin/proofs', methods=['GET'])
 @admin_required
 def admin_proof_wall():
+    # Step 1: Check Supabase connection
     if not supabase:
         flash('Supabase client not initialized.', 'danger')
-        return render_template('admin_proof_wall.html', proofs=[], error='Backend setup issue.')
+        return render_template(
+            'admin_proof_wall.html',
+            proofs=[],
+            error='Backend setup issue.'
+        )
 
     try:
-        # 1. Fetch data with the corrected join
-        response = supabase.table('withdrawal_proofs') \
-            .select('*, profiles!user_id!inner(phone_number)') \
-            .eq('status', 'pending') \
-            .order('created_at', desc=True) \
+        # Step 2: Fetch pending proofs joined with user phone numbers
+        response = (
+            supabase.table('withdrawal_proofs')
+            .select('*, profiles!user_id!inner(phone_number)')
+            .eq('status', 'pending')
+            .order('created_at', desc=True)
             .execute()
+        )
 
         if response.data:
             pending_proofs = []
-            
-            BASE_PUBLIC_URL = f"{SUPABASE_URL}/storage/v1/object/public/{STORAGE_BUCKET_NAME}/"
-            
+
+            # Step 3: Base public URL format
+            BASE_PUBLIC_URL = (
+                f"{SUPABASE_URL}/storage/v1/object/public/{STORAGE_BUCKET_NAME}/"
+            )
+
+            # Step 4: Build complete proof details for each record
             for item in response.data:
-                # *** MODIFICATION START ***
-                full_image_urls = []
-                image_data = item.get('image_url')
-                
-                # Check if the data is a list (for multiple images)
-                if isinstance(image_data, list):
-                    for path in image_data:
-                        full_image_urls.append(BASE_PUBLIC_URL + path)
-                # Handle single image path (for backward compatibility or single uploads)
-                elif isinstance(image_data, str) and image_data:
-                    full_image_urls.append(BASE_PUBLIC_URL + image_data)
-                
-                # *** MODIFICATION END ***
-                
+                full_image_url = BASE_PUBLIC_URL + item['image_url']
+
                 pending_proofs.append({
                     'id': item['id'],
                     'user_id': item['user_id'],
-                    # Pass the LIST of URLs to the template under a new key: 'image_urls'
-                    'image_urls': full_image_urls, 
+                    'image_url': full_image_url,
                     'comment': item['comment'],
                     'phone_number': item['profiles']['phone_number'],
                     'created_at': item['created_at']
                 })
-            
-            return render_template('admin_proof_wall.html', proofs=pending_proofs)
+
+            # Step 5: Render the admin proof wall page
+            return render_template(
+                'admin_proof_wall.html',
+                proofs=pending_proofs
+            )
+
         else:
-            return render_template('admin_proof_wall.html', proofs=[], message='No pending withdrawal proofs.')
+            # No pending proofs
+            return render_template(
+                'admin_proof_wall.html',
+                proofs=[],
+                message='No pending withdrawal proofs.'
+            )
 
     except Exception as e:
+        # Step 6: Handle errors gracefully
         app_logger.error(f"Error fetching pending withdrawal proofs for admin: {e}", exc_info=True)
         flash(f'Error fetching proofs: {e}', 'danger')
-        return render_template('admin_proof_wall.html', proofs=[], error='Error fetching data.')
+        return render_template(
+            'admin_proof_wall.html',
+            proofs=[],
+            error='Error fetching data.'
+        )
+
 
 
 
