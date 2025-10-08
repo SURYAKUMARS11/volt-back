@@ -446,10 +446,6 @@ def admin_proof_wall():
         flash(f'Error fetching proofs: {e}', 'danger')
         return render_template('admin_proof_wall.html', proofs=[], error='Error fetching data.')
 
-
-
-
-
 @app.route('/admin/proofs/approve', methods=['POST'])
 @admin_required
 def approve_withdrawal_proof():
@@ -470,20 +466,31 @@ def approve_withdrawal_proof():
 
         # 2. Add reward_amount to user's order_income in user_wallets
         # Using RPC for atomic update
+        # If this call fails, it will raise an Exception, which is caught below.
         rpc_response = supabase.rpc('increment_order_income', {
             'p_user_id': user_id,
             'p_amount': reward_amount
         }).execute()
 
-        if rpc_response.status_code == 204: # 204 No Content is typical for successful RPC
-            flash(f'Proof {proof_id} approved and ₹{reward_amount} credited to user {user_id}.', 'success')
-        else:
-            app_logger.error(f"Failed to credit user {user_id} with reward for proof {proof_id}. RPC response: {rpc_response.status_code}")
-            flash(f'Proof approved, but failed to credit user. Please check manually. Proof ID: {proof_id}', 'warning')
+        # 3. FIX: RPC success is now confirmed by the lack of an exception
+        # Supabase RPCs with no return (like one just doing an UPDATE) return a 204,
+        # and the Python client returns an object where .data is usually empty.
+        # No need to check for status_code.
+        flash(f'Proof {proof_id} approved and ₹{reward_amount} credited to user {user_id}.', 'success')
+        
+        # Original 'else' block is now redundant, as the exception handler covers failure
+        # and the code reaches here only on success.
 
     except Exception as e:
+        # If the RPC failed (or any other database error occurred), this block runs.
+        # The log already showed the successful HTTP request, so this catch handles 
+        # database-level failure or client exceptions.
         app_logger.error(f"Error approving withdrawal proof {proof_id}: {e}", exc_info=True)
-        flash(f'An unexpected error occurred: {e}', 'danger')
+        # Check if the error is due to an RPC failure (though less likely after fixing the status_code check)
+        if "increment_order_income" in str(e):
+             flash(f'Proof approved, but failed to credit user. Please check manually. Proof ID: {proof_id}', 'warning')
+        else:
+             flash(f'An unexpected error occurred: {e}', 'danger')
 
     return redirect(url_for('admin_proof_wall'))
 
