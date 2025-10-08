@@ -390,6 +390,80 @@ def redeem_gift_code():
         return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
 
 
+
+# --- ADMIN PROOF WALL ROUTES ---
+@app.route('/admin/proofs', methods=['GET'])
+@admin_required
+def admin_proof_wall():
+    if not supabase:
+        flash('Supabase client not initialized.', 'danger')
+        return render_template('admin_proof_wall.html', proofs=[], error='Backend setup issue.')
+
+    try:
+        # Fetch pending withdrawal proofs and join with profiles to get user info
+        response = supabase.table('withdrawal_proofs') \
+            .select('*, profiles!inner(phone_number)') \
+            .eq('status', 'pending') \
+            .order('created_at', desc=True) \
+            .execute()
+
+        if response.data:
+            pending_proofs = []
+            for item in response.data:
+                pending_proofs.append({
+                    'id': item['id'],
+                    'user_id': item['user_id'],
+                    'image_url': item['image_url'],
+                    'comment': item['comment'],
+                    'phone_number': item['profiles']['phone_number'],
+                    'created_at': item['created_at']
+                })
+            return render_template('admin_proof_wall.html', proofs=pending_proofs)
+        else:
+            return render_template('admin_proof_wall.html', proofs=[], message='No pending withdrawal proofs.')
+
+    except Exception as e:
+        app_logger.error(f"Error fetching pending withdrawal proofs for admin: {e}", exc_info=True)
+        flash(f'Error fetching proofs: {e}', 'danger')
+        return render_template('admin_proof_wall.html', proofs=[], error='Error fetching data.')
+
+@app.route('/admin/proofs/approve', methods=['POST'])
+@admin_required
+def approve_withdrawal_proof():
+    proof_id = request.form.get('proof_id')
+    user_id = request.form.get('user_id')
+    reward_amount = 20.0 # Fixed reward amount
+
+    if not all([proof_id, user_id]):
+        flash('Missing proof ID or user ID.', 'danger')
+        return redirect(url_for('admin_proof_wall'))
+
+    try:
+        # 1. Update withdrawal_proofs status to 'approved' and set reward_amount
+        supabase.table('withdrawal_proofs') \
+            .update({'status': 'approved', 'reward_amount': reward_amount, 'updated_at': datetime.datetime.now().isoformat()}) \
+            .eq('id', proof_id) \
+            .execute()
+
+        # 2. Add reward_amount to user's order_income in user_wallets
+        # Using RPC for atomic update
+        rpc_response = supabase.rpc('increment_order_income', {
+            'p_user_id': user_id,
+            'p_amount': reward_amount
+        }).execute()
+
+        if rpc_response.status_code == 204: # 204 No Content is typical for successful RPC
+            flash(f'Proof {proof_id} approved and ₹{reward_amount} credited to user {user_id}.', 'success')
+        else:
+            app_logger.error(f"Failed to credit user {user_id} with reward for proof {proof_id}. RPC response: {rpc_response.status_code}")
+            flash(f'Proof approved, but failed to credit user. Please check manually. Proof ID: {proof_id}', 'warning')
+
+    except Exception as e:
+        app_logger.error(f"Error approving withdrawal proof {proof_id}: {e}", exc_info=True)
+        flash(f'An unexpected error occurred: {e}', 'danger')
+
+    return redirect(url_for('admin_proof_wall'))
+
 # --- EXISTING ROUTES (as provided in your context) ---
 
 @app.route('/api/create-supabase-user', methods=['POST'])
@@ -1527,6 +1601,60 @@ def handle_withdrawal_request():
     except Exception as e:
         app_logger.error(f"Unhandled error in withdrawal request for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred during withdrawal request submission.'}), 500
+
+
+        return jsonify({'success': False, 'message': 'An unexpected error occurred during withdrawal request submission.'}), 500
+
+
+# --- NEW: Upload Withdrawal Proof Endpoint ---
+@app.route('/api/user/upload-withdrawal-proof', methods=['POST'])
+def upload_withdrawal_proof():
+    if not supabase:
+        app_logger.error("Supabase client not initialized in upload_withdrawal_proof.")
+        return jsonify({'success': False, 'message': 'Backend setup issue: Supabase client not initialized.'}), 500
+
+    user_id = request.form.get('user_id')
+    comment = request.form.get('comment', '')
+    files = request.files.getlist('images') # Get list of files
+
+    if not user_id:
+        return jsonify({'success': False, 'message': 'User ID is required.'}), 400
+
+    if not files or len(files) == 0:
+        return jsonify({'success': False, 'message': 'At least one image is required.'}), 400
+
+    if len(files) > 2:
+        return jsonify({'success': False, 'message': 'You can upload a maximum of 2 images.'}), 400
+
+    image_urls = []
+    try:
+        for file in files:
+            file_extension = file.filename.rsplit('.', 1)[1].lower() if '.' in file.filename else 'png'
+            unique_filename = f"{user_id}/{uuid.uuid4()}.{file_extension}"
+            
+            # Upload to Supabase Storage
+            supabase.storage.from_('withdrawal-proofs').upload(unique_filename, file.read(), {'content-type': file.content_type})
+            public_url = supabase.storage.from_('withdrawal-proofs').get_public_url(unique_filename)
+            image_urls.append(public_url)
+
+        # Insert into withdrawal_proofs table
+        insert_response = supabase.table('withdrawal_proofs').insert({
+            'user_id': user_id,
+            'image_url': ', '.join(image_urls), # Store multiple URLs as a comma-separated string
+            'comment': comment,
+            'status': 'pending'
+        }).execute()
+
+        if insert_response.data:
+            app_logger.info(f"Withdrawal proof uploaded and recorded for user {user_id}. Proof ID: {insert_response.data[0]['id']}")
+            return jsonify({'success': True, 'message': 'Withdrawal proof submitted successfully!'}), 200
+        else:
+            app_logger.error(f"Failed to record withdrawal proof for user {user_id}. Supabase error: {insert_response.error if hasattr(insert_response, 'error') else 'No data or error'}")
+            return jsonify({'success': False, 'message': 'Failed to record proof in database.'}), 500
+
+    except Exception as e:
+        app_logger.error(f"Error uploading withdrawal proof for user {user_id}: {e}", exc_info=True)
+        return jsonify({'success': False, 'message': 'An unexpected error occurred during proof upload.'}), 500
 
 
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '7840580443:AAE1UQPFopt9OQdjYjkTWJzhsFQ3NFpcl5s')
