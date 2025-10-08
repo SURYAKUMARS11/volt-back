@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin - Withdrawal Proofs</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.3/css/all.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+        .wrapper {
+            display: flex;
+            width: 100%;
+            align-items: stretch;
+        }
+        #sidebar {
+            min-width: 250px;
+            max-width: 250px;
+            background: #343a40;
+            color: #fff;
+            transition: all 0.3s;
+        }
+        #sidebar.active {
+            margin-left: -250px;
+        }
+        #content {
+            width: 100%;
+            padding: 20px;
+            min-height: 100vh;
+            transition: all 0.3s;
+        }
+        .card {
+            margin-bottom: 20px;
+        }
+        .proof-image {
+            max-width: 100%;
+            height: auto;
+            border-radius: 5px;
+            margin-bottom: 10px;
+        }
+        .flash-messages {
+            margin-top: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="wrapper">
+        <!-- Sidebar -->
+        <nav id="sidebar">
+            <div class="sidebar-header">
+                <h3>Admin Panel</h3>
+            </div>
+            <ul class="list-unstyled components">
+                <li>
+                    <a href="{{ url_for('admin_dashboard') }}">Withdrawal Requests</a>
+                </li>
+                <li class="active">
+                    <a href="{{ url_for('admin_proof_wall') }}">Withdrawal Proofs</a>
+                </li>
+                <li>
+                    <a href="{{ url_for('admin_recharge_dashboard') }}">Recharge Verification</a>
+                </li>
+                <li>
+                    <a href="{{ url_for('admin_logout') }}">Logout</a>
+                </li>
+            </ul>
+        </nav>
+
+        <!-- Page Content -->
+        <div id="content">
+            <nav class="navbar navbar-expand-lg navbar-light bg-light">
+                <div class="container-fluid">
+                    <button type="button" id="sidebarCollapse" class="btn btn-info">
+                        <i class="fas fa-align-left"></i>
+                        <span>Toggle Sidebar</span>
+                    </button>
+                    <h2 class="ml-auto">Withdrawal Proofs</h2>
+                </div>
+            </nav>
+
+            <div class="flash-messages">
+                {% with messages = get_flashed_messages(with_categories=true) %}
+                    {% if messages %}
+                        {% for category, message in messages %}
+                            <div class="alert alert-{{ category }} alert-dismissible fade show" role="alert">
+                                {{ message }}
+                                <button type="button" class="close" data-dismiss="alert" aria-label="Close">
+                                    <span aria-hidden="true">&times;</span>
+                                </button>
+                            </div>
+                        {% endfor %}
+                    {% endif %}
+                {% endwith %}
+            </div>
+
+            {% if error %}
+                <div class="alert alert-danger" role="alert">
+                    {{ error }}
+                </div>
+            {% elif message %}
+                <div class="alert alert-info" role="alert">
+                    {{ message }}
+                </div>
+            {% endif %}
+
+            <div class="row">
+                {% if proofs %}
+                    {% for proof in proofs %}
+                        <div class="col-md-6">
+                            <div class="card">
+                                <div class="card-header">
+                                    Proof ID: {{ proof.id }}
+                                </div>
+                                <div class="card-body">
+                                    <img src="{{ proof.image_url }}" alt="Withdrawal Proof" class="proof-image">
+                                    <p><strong>User ID:</strong> {{ proof.user_id }}</p>
+                                    <p><strong>Phone Number:</strong> {{ proof.phone_number }}</p>
+                                    <p><strong>Comment:</strong> {{ proof.comment if proof.comment else 'N/A' }}</p>
+                                    <p><strong>Submitted On:</strong> {{ proof.created_at }}</p>
+                                    <form action="{{ url_for('approve_withdrawal_proof') }}" method="POST">
+                                        <input type="hidden" name="proof_id" value="{{ proof.id }}">
+                                        <input type="hidden" name="user_id" value="{{ proof.user_id }}">
+                                        <button type="submit" class="btn btn-success btn-block">Approve (Add 20 Rs)</button>
+                                    </form>
+                                </div>
+                            </div>
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="col-12">
+                        <div class="alert alert-info" role="alert">
+                            No pending withdrawal proofs found.
+                        </div>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.5.4/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script>
+        $(document).ready(function () {
+            $('#sidebarCollapse').on('click', function () {
+                $('#sidebar').toggleClass('active');
+            });
+        });
+    </script>
+</body>
+</html>
