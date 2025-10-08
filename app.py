@@ -390,7 +390,7 @@ def redeem_gift_code():
         return jsonify({'success': False, 'message': 'An unexpected error occurred.'}), 500
 
 SUPABASE_URL = "https://uccvtnsvkihfankviyuk.supabase.co" 
-STORAGE_BUCKET_NAME = "withdrawal-proof"
+STORAGE_BUCKET_NAME = "withdrawal-proofs"
 
 @app.route('/admin/proofs', methods=['GET'])
 @admin_required
