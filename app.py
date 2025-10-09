@@ -1687,8 +1687,8 @@ def upload_withdrawal_proof():
         return jsonify({'success': False, 'message': 'An unexpected error occurred during proof upload.'}), 500
 
 
-TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '7840580443:AAE1UQPFopt9OQdjYjkTWJzhsFQ3NFpcl5s')
-TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '5952225695') # <-- Use the chat ID you found
+TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN', '7741011084:AAE3ih8vPxpG1gOUBx9uaVU7IJkhfJdEAk0')
+TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID', '7818222007') # <-- Use the chat ID you found
 
 def send_telegram_notification(message_body):
     """Sends a Telegram message to the specified chat ID."""
