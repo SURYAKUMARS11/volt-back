@@ -1053,7 +1053,7 @@ def admin_verify_manual_payment():
                     
                     if referrer_id:
                         app_logger.info(f"User {user_id} was referred by {referrer_id}. Calculating commission.")
-                        commission_amount = float(recharge_amount_inr) * 0.10
+                        commission_amount = float(recharge_amount_inr) * 0.22
                         
                         commission_rpc_response = supabase.rpc('increment_referral_commission', {
                             'p_user_id': referrer_id,
