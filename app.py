@@ -71,7 +71,7 @@ except Exception as e:
     app_logger.error(f"Error initializing Razorpay client: {e}")
     razorpay_client = None
 
-FRONTEND_SIGNUP_BASE_URL = os.environ.get("FRONTEND_SIGNUP_BASE_URL", "https://tesla-invest.vercel.app/")
+FRONTEND_SIGNUP_BASE_URL = os.environ.get("FRONTEND_SIGNUP_BASE_URL", "https://tesla-invest.vercel.app/signup")
 
 # --- DECORATOR for Admin Authentication ---
 def admin_required(f):
