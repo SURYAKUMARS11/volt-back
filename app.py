@@ -905,6 +905,7 @@ def confirm_manual_payment():
             f"<b>User ID:</b> <code>{user_id}</code>\n"
             f"<b>Amount:</b> ₹{amount}\n"
             f"<b>UTR:</b> <code>{utr_number}</code>\n"
+            f"<b>mobile:</b> <code>{mobile_number}</code>\n"
             f"Status: <b>Pending Admin Verification</b>"
         )
         send_telegram_notification(notification_message)
