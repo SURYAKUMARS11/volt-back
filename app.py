@@ -1537,28 +1537,22 @@ def handle_withdrawal_request():
         if not isinstance(amount, (int, float)) or amount <= 0:
             return jsonify({'success': False, 'message': 'Invalid withdrawal amount.'}), 400
 
-        # NEW: Check for withdrawal frequency
+        # Check for withdrawal frequency (1 per day)
         today = datetime.date.today()
         start_of_day = datetime.datetime.combine(today, datetime.time.min, tzinfo=datetime.timezone.utc)
         
-        withdrawal_count_response = supabase.table('transactions').select('id').eq('user_id', user_id).eq('type', 'withdrawal').gt('created_at', start_of_day.isoformat()).execute()
+        withdrawal_count_response = supabase.table('transactions') \
+            .select('id') \
+            .eq('user_id', user_id) \
+            .eq('type', 'withdrawal') \
+            .gt('created_at', start_of_day.isoformat()) \
+            .execute()
         
         if withdrawal_count_response.data and len(withdrawal_count_response.data) >= 1:
             app_logger.warning(f"Withdrawal failed: User {user_id} has exceeded the daily withdrawal limit.")
             return jsonify({'success': False, 'message': 'You can only withdraw once per day.'}), 403
 
-        # NEW: Check if the user has a successful investment before proceeding
-        investment_check_response = supabase.table('manual_payments') \
-                                            .select('id') \
-                                            .eq('user_id', user_id) \
-                                            .in_('status', ['success', 'completed']) \
-                                            .limit(1) \
-                                            .execute()
-        if not investment_check_response.data or len(investment_check_response.data) == 0:
-            app_logger.warning(f"Withdrawal failed: User {user_id} has no successful investments.")
-            return jsonify({'success': False, 'message': 'You must have a successful investment to withdraw.'}), 403
-
-        # 1. Fetch current order_income from the user's wallet
+        # Fetch current order_income from the user's wallet
         wallet_response = supabase.table('user_wallets').select('order_income').eq('user_id', user_id).single().execute()
         if not wallet_response.data:
             app_logger.warning(f"User wallet not found for withdrawal for user: {user_id}")
@@ -1566,18 +1560,18 @@ def handle_withdrawal_request():
 
         current_order_income = wallet_response.data['order_income']
 
-        # 2. Calculate Fee and Final Amount
+        # Calculate Fee and Final Amount
         fee_rate = 0.12
         withdrawal_fee = round(amount * fee_rate, 2)
         total_amount_to_deduct = round(amount, 2)
 
         print(f"DEBUG: Current income in DB: {current_order_income}, Withdrawal requested: {total_amount_to_deduct}")
 
-        # Check if withdrawal amount exceeds the order_income
+        # Check if withdrawal amount exceeds order_income
         if current_order_income < total_amount_to_deduct:
             return jsonify({'success': False, 'message': 'Insufficient order income for withdrawal.'}), 400
 
-        # 3. Deduct amount from order_income immediately
+        # Deduct amount from wallet
         new_order_income = current_order_income - total_amount_to_deduct
         wallet_update_response = supabase.table('user_wallets').update({'order_income': new_order_income}).eq('user_id', user_id).execute()
 
@@ -1587,7 +1581,7 @@ def handle_withdrawal_request():
 
         app_logger.info(f"Wallet updated for {user_id}. New order income: {new_order_income}. Recording withdrawal request.")
 
-        # 4. Record Transaction with 'pending' status
+        # Record transaction
         transaction_data = {
             'user_id': user_id,
             'amount': total_amount_to_deduct,
@@ -1601,17 +1595,13 @@ def handle_withdrawal_request():
         transaction_response = supabase.table('transactions').insert(transaction_data).execute()
 
         if not transaction_response.data or len(transaction_response.data) == 0:
-            app_logger.error(f"Failed to record pending withdrawal transaction for user {user_id}. Supabase response: {transaction_response.error if hasattr(transaction_response, 'error') else 'No data or error'}")
-            app_logger.error(f"Attempting to refund {total_amount_to_deduct} to user {user_id} due to transaction record failure.")
+            app_logger.error(f"Failed to record pending withdrawal transaction for user {user_id}.")
             supabase.table('user_wallets').update({'order_income': current_order_income}).eq('user_id', user_id).execute()
-            return jsonify({'success': False, 'message': 'Failed to record withdrawal request. Amount refunded to wallet. Please try again or contact support.'}), 500
+            return jsonify({'success': False, 'message': 'Failed to record withdrawal request. Amount refunded to wallet.'}), 500
 
         app_logger.info(f"Withdrawal request recorded as pending for user {user_id}. Transaction ID: {transaction_response.data[0]['id']}")
 
-        account_number = bank_details.get('accountNumber', 'N/A')
-        bank_name = bank_details.get('bankName', 'N/A')
-
-        # --- NEW: Send Telegram notification for withdrawal request ---
+        # Send Telegram notification
         notification_message = (
             f"💸 <b>New Withdrawal Request!</b>\n"
             f"<b>User ID:</b> <code>{user_id}</code>\n"
@@ -1620,7 +1610,6 @@ def handle_withdrawal_request():
             f"Status: <b>Pending Admin Approval</b>"
         )
         send_telegram_notification(notification_message)
-        # -------------------------------------------------------------
 
         return jsonify({
             'success': True,
@@ -1633,8 +1622,6 @@ def handle_withdrawal_request():
         app_logger.error(f"Unhandled error in withdrawal request for user {user_id}: {e}", exc_info=True)
         return jsonify({'success': False, 'message': 'An unexpected error occurred during withdrawal request submission.'}), 500
 
-
-        return jsonify({'success': False, 'message': 'An unexpected error occurred during withdrawal request submission.'}), 500
 
 
 # --- NEW: Upload Withdrawal Proof Endpoint ---
